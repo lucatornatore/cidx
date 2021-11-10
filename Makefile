@@ -3,9 +3,12 @@ CC         = gcc
 FPIC       = "-fPIC"
 
 EXEC_NAME  =cidx
+
 LONG_IDS   =off
 PRODUCTION =on
-DEBUG      =on
+DEBUG      =off
+
+DEBUG_INFO =on
 SANITIZE   =off
 PAPI       =off
 
@@ -36,16 +39,21 @@ COMMON_CFLAGS = -std=c11 -fopenmp -W -Wall -I ./ $(OPT) $(FPIC)
 
 # ----------------------------------------------------------------------------
 
-ifeq ($(PRODUCTION),on)
-$(info compiling for production)
-	OPTIMIZE_FLAGS = -O3 -march=native -faggressive-loop-optimizations
-	CFLAGS = $(OPTIMIZE_FLAGS) -fno-stack-protector $(COMMON_CFLAGS)
-	CIDX = $(EXEC_NAME)
-else
-$(info compiling with debugging symbols)
 ifeq ($(SANITIZE),on)
 	SANITIZE_FLAGS = -fsanitize=float-divide-by-zero -fsanitize=bounds -fsanitize=signed-integer-overflow -fsanitize=vla-bound -fsanitize=undefined -fsanitize=integer-divide-by-zero
 endif
+
+ifeq ($(DEBUG_INFO),on)
+	DBG_INFO = -ggdb3
+endif
+
+ifeq ($(PRODUCTION),on)
+$(info compiling for production)
+	OPTIMIZE_FLAGS = -O3 -march=native -faggressive-loop-optimizations
+	CFLAGS = $(DBG_INFO) $(OPTIMIZE_FLAGS) -fno-stack-protector $(COMMON_CFLAGS) $(SANITIZE_FLAGS)
+	CIDX = $(EXEC_NAME)
+else
+$(info compiling with debugging symbols)
 	CIDX = $(EXEC_NAME)_g
 	CFLAGS = -ggdb3 $(SANITIZE_FLAGS) $(COMMON_CFLAGS)
 endif

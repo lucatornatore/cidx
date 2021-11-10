@@ -233,7 +233,7 @@ int get_subfind_data(char *working_dir, char *subf_base)
 
     // reconstruct the total number of particles
     for( int i = 0; i < 3; i++ )
-      HowMany[i] = (high[i]<<31) + low[i];
+      HowMany[i] = ((unsigned long long)high[i]<<31) + low[i];
     
     fclose(filein);
   }  
@@ -368,14 +368,14 @@ int get_subfind_data(char *working_dir, char *subf_base)
     int  _failures_ = 0;
     ull_t particles_off;
     
-    while( (fofn < Nfofs) && (myoff < fofs[fofn+1].offset) )   // note: usinf fofn+1 is safe because
+    while( (fofn < Nfofs) && (myoff > fofs[fofn+1].offset) )   // note: usinf fofn+1 is safe because
       fofn++;						   // fofs has Nfofs+1 elements
     // find the offset inside the fof
     in_fof_off = myoff - fofs[fofn].offset;
     fof_read   = in_fof_off;
-    read       = in_fof_off;
+    //read       = in_fof_off;
     
-    while( (hn < Nhaloes) && (myoff < haloes[hn+1].offset) )   // note: same here as for hn+1
+    while( (hn < Nhaloes) && (myoff > haloes[hn+1].offset) )   // note: same here as for hn+1
       hn++;
     hn += ( myoff > haloes[hn].offset + haloes[hn].npart );    // in case myoff falls at the end of a fof
                                                                // where its haloes are finished and those
@@ -830,7 +830,7 @@ int get_catalog_data(char *name, int *types)
 	  }
 	if ( nfiles != header.nfiles )
 	  {
-	    printf("There a problem with catalogs for type %d: the expected number of files is %d but I've found %d files\n",
+	    printf("There was a problem with catalogs for type %d: the expected number of files is %d but I've found %d files\n",
 		   t, header.nfiles, nfiles);
 	    return -2;
 	  }
@@ -896,17 +896,18 @@ int get_catalog_data(char *name, int *types)
 
 int get_catalog_numparticles( char *name, catalog_header_t *header )
 {
-  FILE * filein;
+ #define NSIZE (DIR_SIZE+NAME_SIZE+NUM_SIZE+5)
+  FILE * filein = NULL;
   size_t ret;
-  char   fname[ strlen(subf_base)+strlen(working_dir)+5 ];
+  char   fname[ NSIZE ];
   int    nfiles = 1;
   
   // check whether we are multi-file
   //
-  sprintf( fname, "%s", name );  
+  snprintf( fname, NSIZE, "%s", name );  
   if( (filein = fopen( fname, "r" )) == NULL )
     {
-      sprintf( fname, "%s.0", name );
+      snprintf( fname, NSIZE, "%s.0", name );
       if( (filein = fopen( fname, "r" )) == NULL )
 	// unable to find the specified subfind files
 	return 0;
@@ -914,12 +915,12 @@ int get_catalog_numparticles( char *name, catalog_header_t *header )
       do
 	{
 	  fclose(filein);
-	  sprintf( fname, "%s.%d", name, nfiles );
+	  snprintf( fname, NSIZE, "%s.%d", name, nfiles );
 	  nfiles += ((filein = fopen( fname, "r" )) != NULL);
 	}
       while( filein != NULL) ;
 
-      sprintf( fname, "%s.0", name );
+      snprintf( fname, NSIZE, "%s.0", name );
       filein = fopen( fname, "r" );
     }
 
@@ -927,14 +928,14 @@ int get_catalog_numparticles( char *name, catalog_header_t *header )
   ret = fread( header, sizeof(catalog_header_t), 1, filein );
   fclose(filein);
 
-  if( ret != sizeof(catalog_header_t) )
+  if( ret != 1 )
     return -1;
 
   if ( nfiles != header->nfiles )
     return -2;
 
   return nfiles;
-
+ #undef NSIZE
 }
 
 ull_t get_catalog_data_from_file(char *name, int nfiles, ull_t AllN, ull_t myN, particle_t *target)
@@ -948,9 +949,8 @@ ull_t get_catalog_data_from_file(char *name, int nfiles, ull_t AllN, ull_t myN, 
     {
       catalog_header_t header;
       char fname[strlen(name)+5];
-     #define input files[go].ptr
       
-      if ( nfiles > 0 )
+      if ( nfiles > 1 )
 	sprintf( fname, "%s.%d", name, go );
       else
 	sprintf( fname, "%s", name );
@@ -958,20 +958,21 @@ ull_t get_catalog_data_from_file(char *name, int nfiles, ull_t AllN, ull_t myN, 
       files[go].ptr  = fopen( fname, "r" );
       omp_init_lock(&files[go].lock);
 		
-      ret = fread( &header, sizeof(header), 1, input );
-      if ( ret != sizeof header )
+      ret = fread( &header, sizeof(header), 1, files[go].ptr );
+      if ( ret != 1 )
 	break;
 
-      files[go].npart_inc = files[go].npart;
-      files[go].npart_inc += (go > 0 ? files[go-1].npart_inc : 0);
+      files[go].npart     = header.Nparts;
+      files[go].npart_inc = files[go].npart + (go > 0 ? files[go-1].npart_inc : 0);
       
       go++;
-     #undef input
     }
   while( go < nfiles);
 
-  if ( go <nfiles ) {
+  if ( go < nfiles ) {
     printf("there was an I/O problem in reading the catalog files\n");
+    for ( int f = 0; f < go; f++ )
+      fclose(files[f].ptr);
     return -1; }
 
   unsigned int failures = 0;
@@ -985,7 +986,7 @@ ull_t get_catalog_data_from_file(char *name, int nfiles, ull_t AllN, ull_t myN, 
     int   file_start        = 0;
     ull_t file_start_offset = 0;
 
-    while( (file_start < nfiles) && (myoff >= files[file_start].npart_inc) )
+    while( (file_start < nfiles) && (myoff > files[file_start].npart_inc) )
       file_start++;
     file_start_offset = myoff - (files[file_start].npart_inc - files[file_start].npart);
 
@@ -1022,7 +1023,8 @@ ull_t get_catalog_data_from_file(char *name, int nfiles, ull_t AllN, ull_t myN, 
       failures++; }
   }
 
-  
+  for( int f = 0; f < nfiles; f++ )
+    fclose(files[f].ptr);
   free(files);
   
   return 0;
@@ -1038,11 +1040,11 @@ ull_t get_catalog_data_from_file(char *name, int nfiles, ull_t AllN, ull_t myN, 
  *  ------------------------------------------------------------- */
 
 
-int get_list_numparticles( char *, list_header_t * );
-ull_t get_list_data_from_file(char *, int, ull_t, ull_t, list_t *);
+int get_list_numparticles( char *, list_header_t *, int );
+ull_t get_list_data_from_file(char *, int, int, ull_t, ull_t, list_t *, int *);
 
 
-int get_list_ids ( char *name )
+int get_list_ids ( char *name, int file_type )
 {
 
   // find how many particles are in files 
@@ -1051,7 +1053,7 @@ int get_list_ids ( char *name )
   list_header_t header;
 
   Nl = 0;
-  int nfiles = get_list_numparticles( name, &header);
+  int nfiles = get_list_numparticles( name, &header, file_type);
   if ( nfiles == 0 )
     {
       printf("unable to find the list file both as %s and as %s.0\n",
@@ -1061,7 +1063,7 @@ int get_list_ids ( char *name )
   
   if ( nfiles != header.nfiles )
     {
-      printf("There a problem with list: the expected number "
+      printf("There was a problem with list: the expected number "
 	     "of files is %d but I've found %d files\n",
 	     header.nfiles, nfiles);
       return -2;
@@ -1091,6 +1093,8 @@ int get_list_ids ( char *name )
  #pragma omp parallel
   {
     List = (list_t*)calloc( myNl, sizeof(list_t));
+    if( file_type == -1 )
+      Types = (int*)calloc( myNl, sizeof(int));
    #pragma omp atomic update
     failures += (List == NULL);
   }
@@ -1101,18 +1105,20 @@ int get_list_ids ( char *name )
       {
 	if( List != NULL )
 	  free(List);
+	if( Types != NULL )
+	  free(Types);
       }
       printf("I've got a problem in memory allocation\n");
       return -3;
     }
 
-  int typed = get_list_data_from_file( name, 1, myNl, Nl, List);
+  int ret = get_list_data_from_file( name, 1, file_type, myNl, Nl, List, Types);
   
-  return typed;
+  return ret;
 }
 
 
-int get_list_numparticles( char *name, list_header_t *header )
+int get_list_numparticles( char *name, list_header_t *header, int type )
 {
   FILE * filein;
   size_t ret;
@@ -1126,7 +1132,7 @@ int get_list_numparticles( char *name, list_header_t *header )
     {
       sprintf( fname, "%s.0", name );
       if( (filein = fopen( fname, "r" )) == NULL )
-	// unable to find the specified subfind files
+	// unable to find the files
 	return 0;
       
       do
@@ -1141,11 +1147,22 @@ int get_list_numparticles( char *name, list_header_t *header )
       filein = fopen( fname, "r" );
     }
 
-
-  ret = fread( header, sizeof(list_header_t), 1, filein );
+  if( type == -1 )
+    ret = fread( header, sizeof(list_header_t), 1, filein );
+  else {
+    fread ( &(header->id_size), sizeof(int), 1, filein);
+    if( header->id_size == sizeof(int) ) {
+      int nparts;
+      ret = fread ( &nparts, sizeof(int), 1, filein);
+      header->Nparts = nparts; }
+    else
+      ret = fread ( &(header->Nparts), sizeof(ull_t), 1, filein);
+    header->Nparts_total = header->Nparts;
+    header->nfiles = 1; }
+    
   fclose(filein);
 
-  if( ret != sizeof(list_header_t) )
+  if( (type == -1 ) && (ret != sizeof(list_header_t)) )
     return -1;
 
   if ( nfiles != header->nfiles )
@@ -1156,11 +1173,11 @@ int get_list_numparticles( char *name, list_header_t *header )
 }
 
 
-ull_t get_list_data_from_file(char *name, int nfiles, ull_t myN, ull_t AllN, list_t *target)
+ull_t get_list_data_from_file(char *name, int nfiles, int file_type, ull_t myN, ull_t AllN, list_t *target, int *types)
 {
   size_t ret;
   list_header_t header;
-  typedef struct { PID_t pid; int type; } list_pidtype_t;
+  typedef struct __attribute__((packed)) { PID_t pid; int type; } list_pidtype_t;
   typedef struct { PID_t pid; } list_pid_t;
   
   typedef struct { FILE *ptr; ull_t npart, npart_inc; omp_lock_t lock;} record_file_t;
@@ -1170,30 +1187,37 @@ ull_t get_list_data_from_file(char *name, int nfiles, ull_t myN, ull_t AllN, lis
   do
     {      
       char fname[strlen(name)+5];
-     #define input files[go].ptr
       
-      if ( nfiles > 0 )
+      if ( nfiles > 1 )
 	sprintf( fname, "%s.%d", name, go );
       else
 	sprintf( fname, "%s", name );
       
       files[go].ptr  = fopen( fname, "r" );
       omp_init_lock(&files[go].lock);
-		
-      ret = fread( &header, sizeof(header), 1, input );
-      if ( ret != sizeof header )
-	break;
 
+      if( file_type == -1 ) {
+	ret = fread( &header, sizeof(header), 1, files[go].ptr );
+	if ( ret != sizeof header )
+	  break; }
+      else {
+	header.type_is_present = 0;
+	ret = fread ( &header.id_size, sizeof(int), 1, files[go].ptr );
+	ret = fread ( &header.Nparts, sizeof(ull_t), 1, files[go].ptr );
+	header.Nparts_total = header.Nparts; }
+
+      files[go].npart = header.Nparts;
       files[go].npart_inc = files[go].npart;
       files[go].npart_inc += (go > 0 ? files[go-1].npart_inc : 0);
       
       go++;
-     #undef input
     }
   while( go < nfiles);
 
-  if ( go <nfiles ) {
+  if ( go < nfiles ) {
     printf("there was an I/O problem in reading the catalog files\n");
+    for ( int f = 0; f < go; f++ )
+      fclose(files[f].ptr);
     return -1; }
 
   unsigned int failures = 0;
@@ -1233,14 +1257,17 @@ ull_t get_list_data_from_file(char *name, int nfiles, ull_t myN, ull_t AllN, lis
 	    omp_unset_lock( &files[fn].lock );
 
 	    list_t *_target_ = target+read;
+	    int    *_types_ = NULL;
+	    if( types != NULL )
+	      *_types_ = types+read;
 	    switch(header.type_is_present )
 	      {
 	      case 0: {
 		for( ull_t i = 0; i < howmany_toread; i++, _target_++ )
-		  _target_->pid = ((list_pid_t*)buffer)[i].pid, _target_->type = -1; } break;
+		  _target_->pid = ((list_pid_t*)buffer)[i].pid; } break;
 	      default: {
-		for( ull_t i = 0; i < howmany_toread; i++, _target_++ )
-		  _target_->pid = ((list_pidtype_t*)buffer)[i].pid, _target_->type = ((list_pidtype_t*)buffer)[i].type; } break;		
+		for( ull_t i = 0; i < howmany_toread; i++, _target_++, _types_++ )
+		  _target_->pid = ((list_pidtype_t*)buffer)[i].pid, *_types_ = ((list_pidtype_t*)buffer)[i].type; } break;		
 	      }
 	    free( buffer );
 	    
@@ -1261,8 +1288,10 @@ ull_t get_list_data_from_file(char *name, int nfiles, ull_t myN, ull_t AllN, lis
       failures++; }
   }
 
-  
+
+  for( int f = 0; f < nfiles; f++ )
+    fclose(files[f].ptr);
   free(files);
   
-  return (!header.type_is_present);
+  return 0;
 }

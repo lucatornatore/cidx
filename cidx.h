@@ -67,11 +67,11 @@ typedef struct {PID_t pid; unsigned int type, gen, fofid, gid;} particle_t;     
 								                // type  is the gadget's type of the particle
 								                // gen   is the stellar generation, for type 4 particles
 
-typedef struct {PID_t pid; int type; unsigned int gen, fofid, gid;} list_t;
+typedef struct {PID_t pid; unsigned int fofid, gid;} list_t;
 
 typedef struct { PID_t pid; int gen, type; } pidtype_t;
 
-typedef struct { int id_size, particle_t_size, nfiles; ull_t Nparts, Nparts_total; } catalog_header_t;
+typedef struct { int id_size, particle_t_size, nfiles, dummy; ull_t Nparts, Nparts_total; } catalog_header_t;
 
 typedef struct { int id_size, nfiles, type_is_present; ull_t Nparts, Nparts_total; } list_header_t;
 
@@ -96,16 +96,17 @@ extern ull_t *IDdomains[NTYPES];
 
 extern particle_t *P[NTYPES], **P_all[NTYPES], *Pbase;
 extern list_t     *List;
+extern int        *Types;
 
 extern ull_t    Nparts[NTYPES];
-extern ull_t    *Nparts_all[NTYPES];
+extern ull_t   *Nparts_all[NTYPES];
 extern ull_t    Np_all[NTYPES];
 extern ull_t    Np, myNp;
 extern ull_t    Nl, myNl;
 
 extern PID_t    id_mask;
 
-#pragma omp threadprivate(me, P, Pbase, myNp, IDs, myNID, type_positions, Nparts, myNl, List)
+#pragma omp threadprivate(me, P, Pbase, myNp, IDs, myNID, type_positions, Nparts, myNl, List, Types)
 
 
 int   distribute_particles        ( void );
@@ -118,7 +119,7 @@ int   get_stellargenerations      ( PID_t, PID_t, int );
 int   get_subfind_data            ( char *, char *);
 int   get_id_data                 ( char *, char *);
 int   get_catalog_data            ( char *, int *);
-int   get_list_ids                ( char * );
+int   get_list_ids                ( char *, int );
 
 ull_t partition_P_by_pid   ( const ull_t, const ull_t, const PID_t);
 ull_t partition_IDs_by_pid ( const ull_t, const ull_t, const PID_t);
@@ -147,14 +148,14 @@ ull_t check_sorting                    (const ull_t, const ull_t, const int);
 
 
 
-#define dprint( L, T, ... ) if( ((L)<=verbose) && ((T)==-1 || (T)==me) ) printf(__VA_ARGS__);
+#define dprint( L, T, ... ) {if( ((L)<=verbose) && ((T)==-1 || (T)==me) ) printf(__VA_ARGS__);}
 #if defined(DEBUG)
 #define DPRINT( L, T, ... ) dprint(L, T, __VA_ARGS__)
 #else
 #define DPRINT( L, T, ... ) 
 #endif
 
-
+#define UNUSED(x) (void)(x)
 
 extern char working_dir_def[];
 extern char working_dir_subf_base_def[];
@@ -179,8 +180,40 @@ extern char catalog_base[NAME_SIZE];
 extern char snap_name[NAME_SIZE+NUM_SIZE];
 extern char subf_name[NAME_SIZE+NUM_SIZE];
 extern char catalog_name[CATALOG_NAME_SIZE];
-extern char list_name[CATALOG_NAME_SIZE];
 extern char snapnum[NUM_SIZE];
-
+extern char **list_names;
+extern int   *list_types;
+extern int    Nlists;
 
 #define PPP   P[0]
+
+#define ARG_SIZE      20
+#define ARG_HELP_SIZE 120
+#define ARG_DFLT      30
+#define ARG_EX_SIZE   120
+
+#define UNDEFINED        0
+#define CREATE_CATALOGS  1
+#define SEARCH_PARTICLES 2
+
+
+typedef int (*action_t)(char **, int, int);
+
+typedef struct {
+  char arguments_family[ARG_HELP_SIZE*2];
+  char example[ARG_EX_SIZE]; } arg_family_t;
+  
+typedef struct {
+  char       argument[ARG_SIZE];
+  char       dflt[ARG_DFLT];
+  char       help[ARG_HELP_SIZE];
+  char       example[ARG_EX_SIZE];
+  int        family;
+  action_t   action; } arg_t;
+
+extern int   action;
+extern int   help_given;
+extern int   n_args_families;
+extern int   n_args;
+extern arg_t args[];
+extern arg_family_t args_f[];
