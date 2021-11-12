@@ -431,11 +431,11 @@ int get_subfind_data(char *working_dir, char *subf_base)
 
 	      if ( in_file_off > 0 )                                                      // skip initial data if needed
 		{
-		  off_t before = ftello( files[fn].ptr);                                  
-		  fseeko( files[fn].ptr, (off_t)(in_file_off*sizeof(PID_t)), SEEK_CUR);   
-		  off_t after = ftello( files[fn].ptr);
+		  off_t before = ftello( files[fn].ptr );
+		  fseeko( files[fn].ptr, (off_t)(in_file_off*sizeof(PID_t)), SEEK_CUR );
+		  off_t after = ftello( files[fn].ptr );
 		  
-		  if( (ull_t)(after-before) != (in_file_off*sizeof(PID_t) )) {            // check that we read the right amount of data
+		  if( (ull_t)(after-before) != (in_file_off*sizeof(PID_t) )) {            // check that we skipped the right amount of data
 		    printf("%d has got problem, in file %d it is at offset "
 			   "%llu instead of %llu due to %llu \n",
 			   me, fn, (ull_t)after, (ull_t)before+(in_file_off*sizeof(PID_t)), in_file_off);
@@ -799,7 +799,7 @@ int write_particles( FILE *file, int type )
  *  ------------------------------------------------------------- */
 
 int get_catalog_numparticles( char *, catalog_header_t * );
-ull_t get_catalog_data_from_file(char *, int, ull_t, ull_t, particle_t *);
+ull_t get_catalog_data_from_file(char *, int, int, ull_t );
 
 int get_catalog_data(char *name, int *types)
 {
@@ -830,10 +830,13 @@ int get_catalog_data(char *name, int *types)
 	  }
 	if ( nfiles != header.nfiles )
 	  {
-	    printf("There was a problem with catalogs for type %d: the expected number of files is %d but I've found %d files\n",
+	    printf("There was a problem with catalogs for type %d: "
+		   "the expected number of files is %d but I've found %d files\n",
 		   t, header.nfiles, nfiles);
 	    return -2;
 	  }
+	dprint(1, 0, "%llu particles of type %d from catalog %s\n",
+	       header.Nparts_total, t, fname );
 	Np_all[t] = header.Nparts_total;
 	Np += Np_all[t];
        #pragma omp parallel
@@ -885,7 +888,7 @@ int get_catalog_data(char *name, int *types)
     if( types[t] )
       {
 	sprintf( fname, "%s%d", name, t);
-	get_catalog_data_from_file( fname, 1, Nparts[t], Np_all[t], P[t]);
+	get_catalog_data_from_file( fname, 1, t, Np_all[t]);
       }
 
   
@@ -938,7 +941,8 @@ int get_catalog_numparticles( char *name, catalog_header_t *header )
  #undef NSIZE
 }
 
-ull_t get_catalog_data_from_file(char *name, int nfiles, ull_t AllN, ull_t myN, particle_t *target)
+
+ull_t get_catalog_data_from_file(char *name, int nfiles, int type, ull_t AllN )
 {
   size_t ret;
   typedef struct { FILE *ptr; ull_t npart, npart_inc; omp_lock_t lock;} record_file_t;  
@@ -978,9 +982,10 @@ ull_t get_catalog_data_from_file(char *name, int nfiles, ull_t AllN, ull_t myN, 
   unsigned int failures = 0;
  #pragma omp parallel
   {
-    int   rem     = (int)(AllN % (ull_t)Nthreads);
-    PID_t avg_NID = AllN / Nthreads;
-    ull_t myoff   = avg_NID * me;
+    ull_t myNparticles = Nparts[type];
+    int   rem          = (int)(AllN % (ull_t)Nthreads);
+    PID_t avg_NP       = AllN / Nthreads;
+    ull_t myoff        = avg_NP * me;   
     myoff  += ( me > rem ? rem : me );
 
     int   file_start        = 0;
@@ -989,33 +994,49 @@ ull_t get_catalog_data_from_file(char *name, int nfiles, ull_t AllN, ull_t myN, 
     while( (file_start < nfiles) && (myoff > files[file_start].npart_inc) )
       file_start++;
     file_start_offset = myoff - (files[file_start].npart_inc - files[file_start].npart);
+    dprint( 2, me, "[read catalog][A] TH %d - myN is %llu, myoff is %llu so file %d off is %llu\n",
+	    me, myNp, myoff, file_start, file_start_offset );
 
+    particle_t *_target_ = P[type];
+    
     unsigned int _failures_ = 0;
     if( file_start < nfiles )
       {
         int fn = file_start;
 	PID_t read = 0;
 	
-	while( (read < myNID) && (fn < nfiles) && !_failures_ )
+	while( (read < myNparticles) && (fn < nfiles) && !_failures_ )
 	  {
-	    ull_t howmany_toread = myN - read;
+	    ull_t howmany_toread = myNparticles - read;
+
 	    howmany_toread = (howmany_toread > files[fn].npart - file_start_offset ?
 			      files[fn].npart - file_start_offset : howmany_toread);
 
 	    omp_set_lock( &files[fn].lock );
-	    fread( target+read, sizeof(particle_t), howmany_toread, files[fn].ptr);
+	    {
+	      int seek = fseeko(files[fn].ptr, (off_t)(sizeof(catalog_header_t) +
+						       sizeof(particle_t)*file_start_offset), SEEK_SET);
+	      size_t v = fread( _target_+read, sizeof(particle_t),
+				howmany_toread, files[fn].ptr);
+	      
+	      if( v != (size_t)howmany_toread ) {
+	       #pragma omp atomic update
+		failures++; }
+	      else
+		read += howmany_toread;
+	    }
 	    omp_unset_lock( &files[fn].lock );
+
 
 	    fn += (read < myNID);
 	    file_start_offset = 0;
 	    
 	    if( fn == nfiles ) {
-	      _failures_++;
 	     #pragma omp atomic update
 	      failures++; }
-	    else {
-	     #pragma omp atomic read
-	      _failures_ = failures; }	    
+	    
+	   #pragma omp atomic read
+	    _failures_ = failures;
 	  }
       }
     else {
@@ -1041,7 +1062,7 @@ ull_t get_catalog_data_from_file(char *name, int nfiles, ull_t AllN, ull_t myN, 
 
 
 int get_list_numparticles( char *, list_header_t *, int );
-ull_t get_list_data_from_file(char *, int, int, ull_t, ull_t, list_t *, int *);
+ull_t get_list_data_from_file( char *, int, int, ull_t );
 
 
 int get_list_ids ( char *name, int file_type )
@@ -1078,7 +1099,10 @@ int get_list_ids ( char *name, int file_type )
     }
   
   Nl = header.Nparts_total;
+  dprint(1, 0, "%llu particles from list file %s\n",
+	 header.Nparts_total, name );
 
+  
  #pragma omp parallel
   {
     int rem = (int)(Nl % (ull_t)Nthreads);
@@ -1112,7 +1136,7 @@ int get_list_ids ( char *name, int file_type )
       return -3;
     }
 
-  int ret = get_list_data_from_file( name, 1, file_type, myNl, Nl, List, Types);
+  int ret = get_list_data_from_file( name, 1, file_type, Nl);
   
   return ret;
 }
@@ -1150,7 +1174,7 @@ int get_list_numparticles( char *name, list_header_t *header, int type )
   if( type == -1 )
     ret = fread( header, sizeof(list_header_t), 1, filein );
   else {
-    fread ( &(header->id_size), sizeof(int), 1, filein);
+    ret = fread ( &(header->id_size), sizeof(int), 1, filein);
     if( header->id_size == sizeof(int) ) {
       int nparts;
       ret = fread ( &nparts, sizeof(int), 1, filein);
@@ -1173,17 +1197,17 @@ int get_list_numparticles( char *name, list_header_t *header, int type )
 }
 
 
-ull_t get_list_data_from_file(char *name, int nfiles, int file_type, ull_t myN, ull_t AllN, list_t *target, int *types)
+ull_t get_list_data_from_file(char *name, int nfiles, int file_type, ull_t AllN)
 {
   size_t ret;
   list_header_t header;
   typedef struct __attribute__((packed)) { PID_t pid; int type; } list_pidtype_t;
-  typedef struct { PID_t pid; } list_pid_t;
   
   typedef struct { FILE *ptr; ull_t npart, npart_inc; omp_lock_t lock;} record_file_t;
   record_file_t *files  = (record_file_t*)calloc( nfiles, sizeof(record_file_t) );
   
-  int go = 0;
+  int go          = 0;
+  int header_size = 0;
   do
     {      
       char fname[strlen(name)+5];
@@ -1197,10 +1221,12 @@ ull_t get_list_data_from_file(char *name, int nfiles, int file_type, ull_t myN, 
       omp_init_lock(&files[go].lock);
 
       if( file_type == -1 ) {
+	header_size = sizeof(header);
 	ret = fread( &header, sizeof(header), 1, files[go].ptr );
 	if ( ret != sizeof header )
 	  break; }
       else {
+	header_size = sizeof(int)+sizeof(ull_t);
 	header.type_is_present = 0;
 	ret = fread ( &header.id_size, sizeof(int), 1, files[go].ptr );
 	ret = fread ( &header.Nparts, sizeof(ull_t), 1, files[go].ptr );
@@ -1215,7 +1241,7 @@ ull_t get_list_data_from_file(char *name, int nfiles, int file_type, ull_t myN, 
   while( go < nfiles);
 
   if ( go < nfiles ) {
-    printf("there was an I/O problem in reading the catalog files\n");
+    printf("there was an I/O problem in reading the list files\n");
     for ( int f = 0; f < go; f++ )
       fclose(files[f].ptr);
     return -1; }
@@ -1224,8 +1250,8 @@ ull_t get_list_data_from_file(char *name, int nfiles, int file_type, ull_t myN, 
  #pragma omp parallel
   {
     int   rem     = (int)(AllN % (ull_t)Nthreads);
-    PID_t avg_NID = AllN / Nthreads;
-    ull_t myoff   = avg_NID * me;
+    PID_t avg_NL  = AllN / Nthreads;
+    ull_t myoff   = avg_NL * me;
     myoff  += ( me > rem ? rem : me );
 
     int   file_start        = 0;
@@ -1235,42 +1261,52 @@ ull_t get_list_data_from_file(char *name, int nfiles, int file_type, ull_t myN, 
       file_start++;
     file_start_offset = myoff - (files[file_start].npart_inc - files[file_start].npart);
 
+    dprint( 2, me, "[read list][A] TH %d - myN is %llu, myoff is %llu so file %d/%d off is %llu\n",
+	    me, myNl, myoff, file_start, nfiles, file_start_offset );
+    
+    
     unsigned int _failures_ = 0;
     if( file_start < nfiles )
       {
         int fn = file_start;
 	PID_t read = 0;
 	
-	while( (read < myNID) && (fn < nfiles) && !_failures_ )
+	while( (read < myNl) && (fn < nfiles) && !_failures_ )
 	  {
-	    ull_t howmany_toread = myN - read;
+	    ull_t howmany_toread = myNl - read;
 	    howmany_toread = (howmany_toread > files[fn].npart - file_start_offset ?
 			      files[fn].npart - file_start_offset : howmany_toread);
 
 	    int typesize = ( header.type_is_present ?
-			     sizeof(list_pid_t) :
-			     sizeof(list_pidtype_t) );
+			     sizeof(list_pidtype_t) :
+			     sizeof(PID_t) );
 	    char *buffer = (char*)malloc( howmany_toread * typesize);
 	    
 	    omp_set_lock( &files[fn].lock );
+	    int seek = fseeko(files[fn].ptr,
+			      (off_t)(header_size + typesize*file_start_offset), SEEK_SET);
 	    ret = fread( buffer, typesize, howmany_toread, files[fn].ptr);
+	    dprint( 2, me, "[read list][B] TH %d - read %llu from position %llu of file %d/%d\n",
+		    me, (ull_t)ret, (header_size + typesize*file_start_offset), file_start, nfiles );
+	    
 	    omp_unset_lock( &files[fn].lock );
 
-	    list_t *_target_ = target+read;
+	    list_t *_target_ = List+read;
 	    int    *_types_ = NULL;
-	    if( types != NULL )
-	      *_types_ = types+read;
+	    if( Types != NULL )
+	      _types_ = Types+read;
 	    switch(header.type_is_present )
 	      {
 	      case 0: {
 		for( ull_t i = 0; i < howmany_toread; i++, _target_++ )
-		  _target_->pid = ((list_pid_t*)buffer)[i].pid; } break;
+		  _target_->pid = ((PID_t*)buffer)[i]; } break;
 	      default: {
 		for( ull_t i = 0; i < howmany_toread; i++, _target_++, _types_++ )
 		  _target_->pid = ((list_pidtype_t*)buffer)[i].pid, *_types_ = ((list_pidtype_t*)buffer)[i].type; } break;		
 	      }
 	    free( buffer );
-	    
+
+	    read += howmany_toread;
 	    fn += (read < myNID);
 	    file_start_offset = 0;
 	    

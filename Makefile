@@ -8,7 +8,7 @@ LONG_IDS   =off
 PRODUCTION =on
 DEBUG      =off
 
-DEBUG_INFO =on
+DEBUG_INFO =off
 SANITIZE   =off
 PAPI       =off
 

@@ -22,10 +22,15 @@
 #include <math.h>
 #include <unistd.h>
 #include <time.h>
+#include <float.h>
 #include <omp.h>
 #if defined(USE_MPI)
 #include <mpi.h>
 #endif
+
+#define CPU_TIME (clock_gettime( CLOCK_THREAD_CPUTIME_ID, &ts ), \
+		  (double)ts.tv_sec +				 \
+		  (double)ts.tv_nsec * 1e-9)
 
 #define ALIGN 32
 
@@ -142,9 +147,11 @@ extern ull_t mybsearch_in_P       (const particle_t *, const ull_t, const PID_t,
 #endif
 
 #if defined(DEBUG)
-ull_t check_partition                  (const ull_t, const ull_t, const ull_t, const PID_t, const int);
-ull_t check_sorting                    (const ull_t, const ull_t, const int);
+ull_t check_partition             (const ull_t, const ull_t, const ull_t, const PID_t, const int);
+ull_t check_sorting               (const ull_t, const ull_t, const int);
+//#define MASKED_ID_DBG             4927472
 #endif
+
 
 
 
@@ -154,6 +161,8 @@ ull_t check_sorting                    (const ull_t, const ull_t, const int);
 #else
 #define DPRINT( L, T, ... ) 
 #endif
+
+#define PRINT_TIMINGS( S, s, T ) fprintf( timings, "%40s %6.2g %s\n", S, (T), s );
 
 #define UNUSED(x) (void)(x)
 

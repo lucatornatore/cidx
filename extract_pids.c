@@ -240,7 +240,7 @@ unsigned long long get_ids(char *namebase, int *types, int nfiles, int id_size, 
       // open the current file
       //
       if( nfiles > 1 )
-	sprintf( name, "%s.ff", namebase );
+	sprintf( name, "%s.%d", namebase, ff );
       else
 	sprintf( name, "%s", namebase );
       FILE *file = fopen( name, "r" );
@@ -281,7 +281,7 @@ unsigned long long get_ids(char *namebase, int *types, int nfiles, int id_size, 
 		    int *max_data = idata+max;
 		    
 		    for( int k = 0; k < nparts[t] && idata < max_data; k++ ) {		      
-		      int get = (drand48() > selection);
+		      int get = (drand48() < selection);
 		      amount += get;
 		      *idata = ( get ? ibuffer[k] : 0);
 		      idata += ( get ? 1 : 0); }}
@@ -291,7 +291,7 @@ unsigned long long get_ids(char *namebase, int *types, int nfiles, int id_size, 
 		    unsigned long long *ldata    = (unsigned long long*)data;
 		    unsigned long long *max_data = ldata+max;
 		    for( int k = 0; k < nparts[t] && ldata < max_data; k++ ) {		      
-		      int get = (drand48() > selection);
+		      int get = (drand48() < selection);
 		      amount += get;
 		      *ldata = ( get ? lbuffer[k] : 0);
 		      ldata += ( get ? 1 : 0); }}

@@ -247,7 +247,7 @@ arg_t args[] = {
 
 		{"-num", "", "specify the snap/subfind number", "[num]", -1, set_num },
 
-		{"-g", "4", "specify the snap/subfind number", "[num]", -1, set_stellargenerations },
+		{"-g", "4", "specify the number of stellar generation to consider", "[num]", -1, set_stellargenerations },
 
 		{"-list", "", "add list file", "[path/to/file_name] [type]\n\t"
 		 "where type is in <-2,-1,[0..5]>\n\t"
@@ -273,7 +273,7 @@ int help( char **argv, int n, int mode)
   
   printf( "Here it goes a little help from my side:\n\n");
   
-  for ( int i; i < n_args; i++ ) {    
+  for ( int i = 0; i < n_args; i++ ) {    
     args[i].action( NULL, i, 0);                                // set the default
 
     if( args[i].family < 0 )

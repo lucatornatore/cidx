@@ -2,10 +2,6 @@
 #include "cidx.h"
 
 
-#define CPU_TIME (clock_gettime( CLOCK_THREAD_CPUTIME_ID, &ts ), \
-		  (double)ts.tv_sec +				  \
-		  (double)ts.tv_nsec * 1e-9)
-
 
 int main( int argc, char **argv)
 {
@@ -149,7 +145,7 @@ int main( int argc, char **argv)
       tstart = CPU_TIME;
       ret = get_subfind_data( working_dir_subf, subf_name );
       telapsed = CPU_TIME - tstart;
-      fprintf( timings, "%35s %6.2g s\n", "getting subfind data", telapsed );      
+      PRINT_TIMINGS( "getting subfind data", "s", telapsed );      
       
       if( ret!= 0 )
 	{
@@ -173,7 +169,7 @@ int main( int argc, char **argv)
       tstart = CPU_TIME;
       ret = distribute_particles( );
       telapsed = CPU_TIME - tstart;
-      fprintf( timings, "%35s %6.2g s\n", "distributing subfind data", telapsed );
+      PRINT_TIMINGS( "distributing subfind data", "s", telapsed );
       if( ret != 0 )
 	{
 	  printf("[err] some error occurred while redistributing subfind particles, "
@@ -193,8 +189,7 @@ int main( int argc, char **argv)
       tstart = CPU_TIME;
       ret = get_id_data( working_dir_snap, snap_name );
       telapsed = CPU_TIME - tstart;
-      fprintf( timings, "%35s %6.2g s\n", "loading ids and type data",
-	       telapsed );
+      PRINT_TIMINGS( "loading ids and type data", "s", telapsed );
   
       if ( ret != 0 )
 	{
@@ -216,8 +211,7 @@ int main( int argc, char **argv)
       tstart = CPU_TIME;
       ret = distribute_ids( );
       telapsed = CPU_TIME - tstart;
-      fprintf( timings, "%35s %6.2g s\n", "distributing ids and type data",
-	       telapsed );
+      PRINT_TIMINGS( "distributing ids and type data", "s", telapsed );
       
       if ( ret != 0 )
 	{
@@ -235,7 +229,7 @@ int main( int argc, char **argv)
      #pragma omp parallel
       {
 	// ------------------------------------  
-	//  assigne a type to each subfind particle
+	//  assign a type to each subfind particle
 	//
     
        #pragma omp single
@@ -249,8 +243,7 @@ int main( int argc, char **argv)
        #pragma omp master
 	{
 	  telapsed = CPU_TIME - tstart;       
-	  fprintf( timings, "%35s %6.2g s\n", "sorting thread's ids",
-		   telapsed );
+	  PRINT_TIMINGS( "sorting thread's ids", "s", telapsed );
 	}
        #if defined(DEBUG)
        #pragma omp single
@@ -278,15 +271,18 @@ int main( int argc, char **argv)
 
        #pragma omp barrier
 
-	free(IDs);
-	free(IDranges);
-	free(all_NID);
-	free(all_IDs);
+       #pragma omp single
+	{
+	  free(IDs);
+	  free(IDranges);
+	  free(all_NID);
+	  free(all_IDs);
 
-	all_IDs[me] = NULL;
+	  all_IDs[me] = NULL;
+	}
 
 	// ------------------------------------  
-	//  partition the data in each thread by particles type
+	//  partition the data in each thread by particle type
 	//
 
        #pragma omp single
@@ -364,7 +360,7 @@ int main( int argc, char **argv)
 	  }
       }
       telapsed = CPU_TIME - tstart;
-      fprintf( timings, "%35s %6.2g s\n", "sorting", telapsed );
+      PRINT_TIMINGS( "sorting", "s", telapsed );
 
       
       // ------------------------------------  
@@ -417,8 +413,7 @@ int main( int argc, char **argv)
 	}
 
       telapsed = CPU_TIME - tstart;
-      fprintf( timings, "%35s %6.2g s\n", "writing catalogs",
-	       telapsed );
+      PRINT_TIMINGS( "writing catalogs", "s", telapsed );
       
       free(catalog_files);
   
@@ -471,7 +466,7 @@ int main( int argc, char **argv)
 	tstart = CPU_TIME;
 	int ret = get_catalog_data( catalog_name, &input_types[0] );
 	telapsed = CPU_TIME - tstart;
-	fprintf( timings, "%35s %6.2g s\n", "getting catalogs data", telapsed );
+	PRINT_TIMINGS( "getting catalogs data", "s", telapsed );
 	if( ret ) {
 	  printf( "a problem arose when reading catalog\n"
 		 " I'm stopping here\n" );
@@ -492,6 +487,8 @@ int main( int argc, char **argv)
       
       // get the ids from the list
       //
+      double *search_timings = (double*)calloc( Nthreads, sizeof(double) );
+      memset( search_timings, 0, sizeof(double)*Nthreads);
       
       for ( int ll = 0; ll < Nlists; ll++ )
 	{
@@ -499,36 +496,45 @@ int main( int argc, char **argv)
 	  tstart = CPU_TIME;
 	  get_list_ids( list_names[ll], list_types[ll] );
 	  telapsed = CPU_TIME - tstart;
-	  fprintf( timings, "%35s %6.2g s\n", "getting ids from list", telapsed );
+	  PRINT_TIMINGS( "getting ids from list", "s", telapsed );
 	  dprint( 0, 0, "%llu found\n", Nl);
 
 	  int type_start = 0, type_end = NTYPES;
 	  if( list_types[ll] >= 0 )
 	    type_start = list_types[ll], type_end = list_types[ll]+1;
 
-	  ull_t out_of_range = 0;
-	  ull_t id_fails     = 0;
-	  ull_t g_fails      = 0;
-	  ull_t found        = 0;
+	  ull_t  out_of_range = 0;
+	  ull_t  id_fails     = 0;
+	  ull_t  g_fails      = 0;
+	  ull_t  found        = 0;
+	  double search_avg   = 0;
+	  
+	  char  name_out[ strlen(list_names[ll])+5 ];
+	  snprintf( name_out, strlen(catalog_name)+5 , "%s.fh", list_names[ll] );
+	  FILE *list_out = fopen( name_out, "w" );	  
 
+	  dprint(0, 0, "searching for ids..\n" ); fflush(stdout);
+	  
 	  tstart = CPU_TIME;
-	 #pragma omp parallel reduction(+:out_of_range, id_fails, g_fails, found)
+	 #pragma omp parallel reduction(+:out_of_range, id_fails, g_fails, found, search_avg)
 	  {
 
 	    ull_t my_out_of_range = 0;
 	    ull_t my_id_fails     = 0;
 	    ull_t my_g_fails      = 0;
 	    ull_t my_found        = 0;
+	    int   bs              = sizeof(PID_t)*8 - id_bitshift;
 	    
+	    double mytstart = CPU_TIME;
 	    for( ull_t j = 0; j < myNl; j++ )
 	      {
-		
+
 		// find masked ids and generation
 		PID_t        masked_id;
 		unsigned int generation;
 
 		masked_id  = List[j].pid & id_mask;
-		generation = List[j].pid >> id_bitshift;
+		generation = List[j].pid >> bs;
 		// in case the particles have different types and the
 		// type is known, let's set-up the type boundaries
 		// individually for each particle
@@ -571,6 +577,7 @@ int main( int argc, char **argv)
 			      // let's seek for the right particles
 			      // among different generation ones
 			      particle_t *p_stop = P_all[t][target_thread] + Nparts_all[t][target_thread];
+			      while( res->pid == masked_id && res->gen > 0 ) res--;
 			      while( (res < p_stop) &&              // not beyond limits
 				     (res->pid == masked_id) &&     // still the correct masked id
 				     (res->gen != generation) )     // not yet the correct generation
@@ -592,10 +599,25 @@ int main( int argc, char **argv)
 		      my_out_of_range++;
 		  }
 	      }
+	    double mytelapsed = CPU_TIME - mytstart;
+	    search_timings[me] += mytelapsed;   // a little bit of false-sharing,
+						// but that has a negligible impact on performance.
+	    
+	   #pragma omp single
+	    dprint(0, me, "writing file..\n");
+	   #pragma omp for ordered
+	    for( int th = 0; th < Nthreads; th++ ) 
+	      fwrite( List, sizeof(list_t), myNl, list_out);
 
+	   #pragma omp barrier
+	   #pragma omp single
+	    fclose(list_out);
+	    
 	    if ( List != NULL ) { free( List ); List = NULL; }
 	    if ( Types != NULL ) { free( Types ); Types = NULL; }
-	    
+
+	   #pragma omp atomic update
+	    search_avg += mytelapsed;
 	   #pragma omp atomic update
 	    found += my_found;
 	   #pragma omp atomic update
@@ -610,26 +632,39 @@ int main( int argc, char **argv)
 						// its own search
 	    if( ll == Nlists - 1 )
 	      free( Pbase );                    // no more lists to process
-						// let's free the memory
+						// let's free the particles array
 
 	  } // close parallel region
 
-	  telapsed = CPU_TIME - tstart;
-	  fprintf( timings, "%35s %6.2g s\n", "searching for list", telapsed );
+	  telapsed = CPU_TIME - tstart;	  
+	  PRINT_TIMINGS( "searching for lists & writing files", "s", telapsed );
+	  search_avg /= (Nthreads * Nlists);
+	  PRINT_TIMINGS( "searching for lists (avg)", "s", search_avg );
+	  {
+	    double mint = DBL_MAX;
+	    double maxt = 0;
+	    for ( int t = 0; t < Nthreads; t++ ) {
+	      mint = (mint > search_timings[t] ? search_timings[t] : mint );
+	      maxt = (maxt < search_timings[t] ? search_timings[t] : maxt ); }
+	    free( search_timings );
+	    PRINT_TIMINGS( "searching for lists (imb)", "%", (maxt-mint)/search_avg*100 );
+	    //PRINT_TIMINGS( "searching for lists (min)", "s", mint );
+	    //PRINT_TIMINGS( "searching for lists (max)", "s", maxt );
+	  }
 
-	  
-	  if ( out_of_range || g_fails || id_fails )
-	    dprint(0, 0, "%llu out-of-range, %llu not found, "
-		   "%llu not found for correct generation\n",
-		   out_of_range, id_fails, g_fails );
 	  dprint(0, 0, "%llu / %llu particles found\n",
 		 found, Nl);
+	  
+	  if ( out_of_range || g_fails || id_fails )
+	    dprint(0, 0, "\t%llu ids were out-of-range\n"
+		   "\t%llu ids have not been found in catalogs\n"
+		   "\t%llu ids have not been found with exact generation\n",
+		   out_of_range, id_fails, g_fails );
   
 	}
 
       free( IDdomains[0] );
       free( Nparts_all[0] );
-      free( Np_all[0] );
       for( int t = 0; t < NTYPES; t++ )
 	free(P_all[t]);
     }
@@ -637,13 +672,12 @@ int main( int argc, char **argv)
 
 
   telapsed = CPU_TIME - tbegin;
-  fprintf( timings, "%35s %6.2g\n", "total time",
-	   telapsed );
+  PRINT_TIMINGS( "total time", "s", telapsed );
 
   fclose( details );
   fclose( timings );
 
-  // un-process arguments for those who need it
+  // un-process arguments 
   //
   {
     int point = 1;

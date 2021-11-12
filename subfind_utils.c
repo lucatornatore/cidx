@@ -69,6 +69,11 @@ int mask_ids_and_find_ranges( const PID_t id_mask, const int bitshift, ull_t *ra
 	//id_size_alert += ( ID > id_mask );
 	masked_id = ID & id_mask;
 	int  gen       = ID >> bs;
+       #if defined(DEBUG) && defined(MASKED_ID_DBG)
+	if( masked_id == MASKED_ID_DBG )
+	  dprint(0, me, "[ID DBG] found particle with masked id %llu, gen %d\n",
+		 (ull_t)masked_id, gen);
+       #endif
 	min_bound      = ( min_bound > masked_id ? masked_id : min_bound );
 	max_bound      = ( max_bound < masked_id ? masked_id : max_bound );
 	switch( mode )
