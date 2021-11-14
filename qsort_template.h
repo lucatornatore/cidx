@@ -129,9 +129,9 @@ typedef struct
       stack size is needed (actually O(1) in this case)! */
 
 int
-QS_ROUTINE_NAME (void* restrict vbase_ptr, ull_t total_elems);
+QS_ROUTINE_NAME (void* restrict vbase_ptr, num_t total_elems);
 int
-QS_ROUTINE_NAME (void* restrict vbase_ptr, ull_t total_elems)
+QS_ROUTINE_NAME (void* restrict vbase_ptr, num_t total_elems)
 {
   /* Allocating SIZE bytes for a pivot buffer facilitates a better
      algorithm below since we can do comparisons directly on the pivot. */

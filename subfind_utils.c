@@ -6,12 +6,12 @@
 #define XCHG_ID(P1, P2) {pidtype_t temp1 = *P1; pidtype_t temp2 = *P2; *P1 = temp2; *P2 = temp1;}
 
 
-int mask_ids_and_find_ranges           ( const PID_t, const int, ull_t *, int );
+int mask_ids_and_find_ranges ( const PID_t, const int, num_t *, int );
 
 
 
 
-int mask_ids_and_find_ranges( const PID_t id_mask, const int bitshift, ull_t *ranges, int mode )
+int mask_ids_and_find_ranges( const PID_t id_mask, const int bitshift, num_t *ranges, int mode )
 /*
  * this routine is getting through the particles masking their
  * ID by the stellar generation mask, so that the id of each particle
@@ -44,11 +44,11 @@ int mask_ids_and_find_ranges( const PID_t id_mask, const int bitshift, ull_t *ra
   PID_t max_bound = 0;
   int id_size_alert   = 0;
   
-  DPRINT(1,0, "id_mask is %llu\n", (ull_t)id_mask);
+  DPRINT(1,0, "id_mask is %llu\n", (num_t)id_mask);
  #pragma omp parallel reduction(min:min_bound) reduction(max:max_bound)
   {
     int   bs = sizeof(PID_t)*8 - bitshift;
-    ull_t N;
+    num_t N;
 
     switch(mode)
       {
@@ -57,7 +57,7 @@ int mask_ids_and_find_ranges( const PID_t id_mask, const int bitshift, ull_t *ra
       default: N = 0;
       }
     
-    for ( ull_t i = 0; i < N; i++ )
+    for ( num_t i = 0; i < N; i++ )
       {
 	PID_t ID, masked_id;
 	switch( mode )
@@ -71,8 +71,8 @@ int mask_ids_and_find_ranges( const PID_t id_mask, const int bitshift, ull_t *ra
 	int  gen       = ID >> bs;
        #if defined(DEBUG) && defined(MASKED_ID_DBG)
 	if( masked_id == MASKED_ID_DBG )
-	  dprint(0, me, "[ID DBG] found particle with masked id %llu, gen %d\n",
-		 (ull_t)masked_id, gen);
+	  dprint(0, me, "[ID DBG][M][th %d] found particle with masked id %llu, gen %d\n", me,
+		 (num_t)masked_id, gen);
        #endif
 	min_bound      = ( min_bound > masked_id ? masked_id : min_bound );
 	max_bound      = ( max_bound < masked_id ? masked_id : max_bound );
@@ -86,7 +86,7 @@ int mask_ids_and_find_ranges( const PID_t id_mask, const int bitshift, ull_t *ra
 
   /* if ( id_size_alert ) */
   /*   printf("* ---> [ err ] it seems that you have less than %d stellar generations\n", n_stars_generations); */
-  DPRINT(1, 0, "min and max are %llu %llu\n", (ull_t)min_bound, (ull_t)max_bound);
+  DPRINT(1, 0, "min and max are %llu %llu\n", (num_t)min_bound, (num_t)max_bound);
   PID_t delta = (max_bound - min_bound) / Nthreads;
   
   for ( int i = 1; i < Nthreads; i++ )
@@ -99,7 +99,7 @@ int mask_ids_and_find_ranges( const PID_t id_mask, const int bitshift, ull_t *ra
 
 
 
-inline ull_t partition_P_by_pid( const ull_t start, const ull_t stop, const PID_t V)
+inline num_t partition_P_by_pid( const num_t start, const num_t stop, const PID_t V)
 /*
  * This function separates the elements of an array which are smaller and larger than V.
  * ALl the elements that are smaller or equal than V are moved in the first part of the
@@ -125,7 +125,7 @@ inline ull_t partition_P_by_pid( const ull_t start, const ull_t stop, const PID_
   if( start >= stop )
     return start + (start < myNp ? PPP[start].pid < V : 0);
 
-  ull_t j = start;
+  num_t j = start;
   register PID_t myV = V;
 
   while( (j < stop) && (PPP[j].pid <= myV) )
@@ -134,7 +134,7 @@ inline ull_t partition_P_by_pid( const ull_t start, const ull_t stop, const PID_
   if ( j == stop )
     return stop;
 
-  ull_t      stop_1 = stop-1;
+  num_t      stop_1 = stop-1;
   PID_t      A;
   register particle_t *ptr;
   
@@ -163,11 +163,11 @@ inline ull_t partition_P_by_pid( const ull_t start, const ull_t stop, const PID_
   if( PPP[stop_1].pid <= myV ) {
     XCHG_P( ptr, &PPP[stop_1]); ptr++; }
 
-  return (ull_t)(ptr - PPP);
+  return (num_t)(ptr - PPP);
 }
 
 
-inline ull_t partition_IDs_by_pid( const ull_t start, const ull_t stop, const PID_t V)
+inline num_t partition_IDs_by_pid( const num_t start, const num_t stop, const PID_t V)
 /*
  * This function separates the elements of an array which are smaller and larger than V.
  * ALl the elements that are smaller or equal than V are moved in the first part of the
@@ -190,7 +190,7 @@ inline ull_t partition_IDs_by_pid( const ull_t start, const ull_t stop, const PI
   if( start >= stop )
     return start + (start < myNID ? IDs[start].pid < V : 0);
   
-  ull_t j = start;
+  num_t j = start;
   register PID_t myV = V;
   
   while( (j < stop) && (IDs[j].pid <= myV) )
@@ -199,7 +199,7 @@ inline ull_t partition_IDs_by_pid( const ull_t start, const ull_t stop, const PI
   if ( j == stop )
     return stop;
   
-  ull_t      stop_1 = stop-1;
+  num_t      stop_1 = stop-1;
   PID_t      A;
   register pidtype_t *ptr;
 
@@ -229,11 +229,11 @@ inline ull_t partition_IDs_by_pid( const ull_t start, const ull_t stop, const PI
     XCHG_ID( ptr, &IDs[stop_1]); ptr++; }
 
 
-  return (ull_t)(ptr - IDs);
+  return (num_t)(ptr - IDs);
 }
 
 
-inline ull_t partition_P_by_type( const ull_t start, const ull_t stop, const unsigned int V)
+inline num_t partition_P_by_type( const num_t start, const num_t stop, const unsigned int V)
 /*
  * This routine does the partitioning of the particles of each thread by a given type.
  * At the end, the particles in the PPP (i.e. P[0]) array are divided in 2 bunches: the first
@@ -248,7 +248,7 @@ inline ull_t partition_P_by_type( const ull_t start, const ull_t stop, const uns
   if( start >= stop )
     return start + (start < myNp ? PPP[start].type < V : 0);
   
-  ull_t j = start;
+  num_t j = start;
   register unsigned int myV = V;
 
   while( (j < stop) && (PPP[j].type <= myV) )
@@ -257,7 +257,7 @@ inline ull_t partition_P_by_type( const ull_t start, const ull_t stop, const uns
   if ( j == stop )
     return stop;
 
-  ull_t        stop_1 = stop - 1;
+  num_t        stop_1 = stop - 1;
   unsigned int A;
   register particle_t *ptr;
 
@@ -287,12 +287,12 @@ inline ull_t partition_P_by_type( const ull_t start, const ull_t stop, const uns
     XCHG_P( ptr, &PPP[stop_1]); ptr++; }
 
 
-  return (ull_t)(ptr - PPP);
+  return (num_t)(ptr - PPP);
 }
 
 
-int k_way_partition( const ull_t start, const ull_t stop, const int start_range, const int stop_range,
-		     const ull_t *ranges, ull_t *restrict positions, int mode)
+int k_way_partition( const num_t start, const num_t stop, const int start_range, const int stop_range,
+		     const num_t *ranges, num_t *restrict positions, int mode)
 /*
  * This routine does the partitioning of the particles by multiple values.
  * At the end, the particles in the PPP (i.e. P[0]) array are divided in bunches of
@@ -326,7 +326,7 @@ int k_way_partition( const ull_t start, const ull_t stop, const int start_range,
   PAPI_STOP;
 
  #if defined(DEBUG)
-  ull_t fails = check_partition(start, stop, positions[Nhalf], ranges[Nhalf], mode);
+  num_t fails = check_partition(start, stop, positions[Nhalf], ranges[Nhalf], mode);
   if( fails )
     printf("--------- thread %d has %llu failures with mode %d in partition from %llu to %llu with pivot %llu\n",
 	   me, fails, mode, start, stop, positions[Nhalf]);
@@ -349,14 +349,14 @@ int k_way_partition( const ull_t start, const ull_t stop, const int start_range,
 
 
 #if defined(DEBUG)
-ull_t check_partition(const ull_t start, const ull_t stop, const ull_t pivot, const PID_t V, const int mode)
+num_t check_partition(const num_t start, const num_t stop, const num_t pivot, const PID_t V, const int mode)
 /*
  * when DEBUG is set, ths routine checks that a partitioning has been done correctly
  *
  */
 {
-  ull_t ii;
-  ull_t tmp = 0;
+  num_t ii;
+  num_t tmp = 0;
   
   switch( mode )
     {
@@ -373,13 +373,13 @@ ull_t check_partition(const ull_t start, const ull_t stop, const ull_t pivot, co
       {
 	unsigned int iV = (int)V;
 	for(ii = start; ii < pivot; ii++){     // check the first part
-	  ull_t f = (PPP[ii].type > iV);
+	  num_t f = (PPP[ii].type > iV);
 	  if(f)
 	    tmp ++; }
 	
 	if( ii < stop - 1)                // check the second part
 	  for(; ii < stop; ii++) {
-	    ull_t f = (PPP[ii].type < iV);
+	    num_t f = (PPP[ii].type < iV);
 	    if(f)
 	      tmp++; }
       } break;      
@@ -399,14 +399,14 @@ ull_t check_partition(const ull_t start, const ull_t stop, const ull_t pivot, co
 
 
 
-ull_t check_sorting(const ull_t start, const ull_t stop, const int mode)
+num_t check_sorting(const num_t start, const num_t stop, const int mode)
 /*
  * when DEBUG is set, ths routine checks that a sorting has been done correctly
  *
  */
 {
-  ull_t ii;
-  ull_t tmp = 0;
+  num_t ii;
+  num_t tmp = 0;
   
   switch( mode )
     {
@@ -433,10 +433,10 @@ ull_t check_sorting(const ull_t start, const ull_t stop, const int mode)
 int distribute_particles( void )
 {
   int         fails = 0;
-  ull_t       matrix[Nthreads][Nthreads];
-  ull_t      *Pranges;
+  num_t       matrix[Nthreads][Nthreads];
+  num_t      *Pranges;
     
-  memset( matrix, 0, sizeof(ull_t) * Nthreads * Nthreads );
+  memset( matrix, 0, sizeof(num_t) * Nthreads * Nthreads );
   
   /* ---------------------------------------------------------
    * 
@@ -455,7 +455,7 @@ int distribute_particles( void )
 
   // mask the ids and find the ranges
   //
-  Pranges = calloc( Nthreads, sizeof(ull_t) );
+  Pranges = calloc( Nthreads, sizeof(num_t) );
   mask_ids_and_find_ranges( id_mask, id_bitshift, Pranges, 0 );
 
   if( Nthreads == 1 )
@@ -464,10 +464,10 @@ int distribute_particles( void )
       return 0;
     }
 
-  ull_t min_p = myNp, max_p = 0;
+  num_t min_p = myNp, max_p = 0;
  #pragma omp parallel reduction(min:min_p) reduction(max:max_p)
   {
-    ull_t positions[Nthreads];
+    num_t positions[Nthreads];
     
     // partition the particles in each thread
     // so that at the end they are divided in bunches
@@ -482,9 +482,9 @@ int distribute_particles( void )
     //matrix[Nthreads-1][me] = myNp - positions[Nthreads-2];
 
    #if defined(DEBUG)
-    ull_t _sum_ = 0;
+    num_t _sum_ = 0;
     for ( int i = 0; i < Nthreads; i++ ) {
-      DPRINT(2,-1, "[ particles ] th %d will send %llu particles to %d\n", me, (ull_t)matrix[i][me], i); _sum_ += matrix[i][me];}
+      DPRINT(2,-1, "[ particles ] th %d will send %llu particles to %d\n", me, (num_t)matrix[i][me], i); _sum_ += matrix[i][me];}
     DPRINT(2,-1, "[ particles ] th %d : total p is %llu\n", me, _sum_);
    #endif
     
@@ -492,10 +492,10 @@ int distribute_particles( void )
 
     // check that I do have enough memory
     //
-    ull_t NN   = 0;
+    num_t NN   = 0;
     for( int i = 0; i < Nthreads; i++ )
       {
-	ull_t amount = matrix[me][i];
+	num_t amount = matrix[me][i];
 	matrix[me][i] = NN;
 	NN += amount;
       }
@@ -523,14 +523,14 @@ int distribute_particles( void )
 	    
 	    
 	    particle_t *target = P_all[0][i] + matrix[i][me];
-	    ull_t amount;
+	    num_t amount;
 	    if ( i == 0 )
 	      amount = positions[0];
 	    else
 	      amount = positions[i] - positions[i-1];
 
 	    DPRINT(2,-1, "[ D4 ] th %d -> th %d %llu\n", me, i, amount );
-	    for( ull_t j = 0; j < amount; j++ )
+	    for( num_t j = 0; j < amount; j++ )
 	      {
 		*target++ = *source++;
 	      }
@@ -551,8 +551,18 @@ int distribute_particles( void )
 
     min_p = (min_p > myNp ? myNp : min_p);
     max_p = (max_p < myNp ? myNp : max_p);
+
+   #if defined(DEBUG) && defined(MASKED_ID_DBG)
+    for( int i = 0; i < myNp; i++ )
+      if( P[0][i].pid == MASKED_ID_DBG )
+	dprint(0, me, "[ID DBG][R][th %d] found particle with masked id %llu, gen %d at pos %d\n", me,
+	       P[0][i].pid, P[0][i].gen, i);
+   #endif
+
+    
   }
 
+  free(Pranges);
   fprintf( details, "---- maximum imbalance in subfind particles distribution is %3.1f%%\n\n",
 	   (double)(max_p - min_p)*100/max_p);
     
@@ -616,15 +626,15 @@ int distribute_ids( void )
 {
 
   int   fails = 0;
-  ull_t matrix[Nthreads][Nthreads];  
-  memset( matrix, 0, sizeof(ull_t) * Nthreads * Nthreads );
+  num_t matrix[Nthreads][Nthreads];  
+  memset( matrix, 0, sizeof(num_t) * Nthreads * Nthreads );
 
   all_IDs = (pidtype_t**)calloc( Nthreads, sizeof(pidtype_t*) );
-  all_NID = (ull_t*)calloc( Nthreads, sizeof(ull_t) );
+  all_NID = (num_t*)calloc( Nthreads, sizeof(num_t) );
   
   // mask the ids and find the ranges
   //
-  IDranges = (ull_t*)calloc( Nthreads, sizeof(ull_t) );  
+  IDranges = (num_t*)calloc( Nthreads, sizeof(num_t) );  
   mask_ids_and_find_ranges( id_mask, id_bitshift, IDranges, 2 );
 
   if ( Nthreads == 1 )
@@ -634,12 +644,12 @@ int distribute_ids( void )
       return 0;
     }
 
-  ull_t min_p = myNID, max_p = 0;
+  num_t min_p = myNID, max_p = 0;
  #pragma omp parallel reduction(min:min_p) reduction(max:max_p)
   {
-    ull_t NN = 0;
-    ull_t positions[Nthreads];
-    memset(positions, 0, sizeof(ull_t)*Nthreads);
+    num_t NN = 0;
+    num_t positions[Nthreads];
+    memset(positions, 0, sizeof(num_t)*Nthreads);
     
     // partition the particles in each thread
     // so that at the end they are divided in bunches
@@ -664,13 +674,13 @@ int distribute_ids( void )
 	dprint(2, 0, "    %2d   ", i);
       dprint(2, 0, "\n");
       for( int i = 0; i < Nthreads; i++ ) {
-	ull_t _sum_ = 0;
+	num_t _sum_ = 0;
 	dprint(2, 0, "   %2d  ", i);
 	for( int j = 0; j< Nthreads; j++ ) {
 	  _sum_ += matrix[i][j]; dprint(2, 0, "%9llu", matrix[i][j]);}
 	dprint(2, 0, "\t%12llu\n", _sum_);}
     }
-    ull_t _sum_ = 0;
+    num_t _sum_ = 0;
     for ( int i = 0; i < Nthreads; i++ ) {
       _sum_ += matrix[i][me];}
    #endif
@@ -681,7 +691,7 @@ int distribute_ids( void )
    #pragma omp barrier
     for( int i = 0; i < Nthreads; i++ )
       {
-	ull_t amount = matrix[me][i];
+	num_t amount = matrix[me][i];
 	matrix[me][i] = NN;
 	NN += amount;
       }
@@ -723,14 +733,14 @@ int distribute_ids( void )
 	for ( int i = 0; i < Nthreads; i++ )
 	  {
 	    pidtype_t *target = all_IDs[i] + matrix[i][me];
-	    ull_t amount;
+	    num_t amount;
 	    if ( i == 0 )
 	      amount = positions[0];
 	    else
 	      amount = positions[i] - positions[i-1];
 
 	    DPRINT(2,-1, "[ IDs ] th %d -> th %d %llu ** %llu %llu\n", me, i, amount, (i>0?positions[i-1]:0), positions[i] );
-	    for ( ull_t j = 0; j < amount; j++ )
+	    for ( num_t j = 0; j < amount; j++ )
 	      *target++ = *source++;
 	  }
 
@@ -796,15 +806,15 @@ int compare_pid_with_particle_t( const void *A, const void *B )
 }
 
 
-int sort_thread_particles( ull_t *positions )
+int sort_thread_particles( num_t *positions )
 {
 
-  ull_t start = 0;
+  num_t start = 0;
   for ( int t = 0; t < NTYPES; t++ )
     {
-      ull_t stop = positions[t];
+      num_t stop = positions[t];
      #if !defined(USE_LIBC_QSORT)
-      inline_qsort_particle_id_gen( (void*)(PPP+start), (ull_t)(stop-start));
+      inline_qsort_particle_id_gen( (void*)(PPP+start), (num_t)(stop-start));
      #else  
       qsort( (void*)(PPP+start), (size_t)(stop-start), sizeof(particle_t), compare_idsgen_in_particle_t);
      #endif
@@ -827,17 +837,17 @@ int sort_thread_idtype( void )
 }
 
 
-int assign_type_to_subfind_particles( ull_t *o_of_r, ull_t *failures)
+int assign_type_to_subfind_particles( num_t *o_of_r, num_t *failures)
 {
   /* FILE *FILE; */
   /* char name[100]; */
   /* sprintf(name, "fails.%d", me); */
   /* FILE = fopen( name, "w"); */
   
-  ull_t out_of_range = 0;
-  ull_t fails = 0;
+  num_t out_of_range = 0;
+  num_t fails = 0;
   
-  for( ull_t j = 0; j < myNp; j++ )
+  for( num_t j = 0; j < myNp; j++ )
     {
       
       int target_thread = 0;
@@ -851,7 +861,7 @@ int assign_type_to_subfind_particles( ull_t *o_of_r, ull_t *failures)
 	  
 	 #if !defined(USE_LIBC_BSEARCH)
 	  int err;
-	  ull_t pos = mybsearch_in_ids(all_IDs[target_thread], all_NID[target_thread], PPP[j].pid, &err);
+	  num_t pos = mybsearch_in_ids(all_IDs[target_thread], all_NID[target_thread], PPP[j].pid, &err);
 	  res = ( err == 0? &all_IDs[target_thread][pos] : NULL );
 	  
 	 #else
@@ -863,7 +873,7 @@ int assign_type_to_subfind_particles( ull_t *o_of_r, ull_t *failures)
 	    PPP[j].type = res->type;
 	  else {
 	    fails++;
-	    //DPRINT(1, -1, "* particle %llu pid %llu gen %d has no counterpart in thread %d\n", j, (ull_t)PPP[j].pid, PPP[j].gen, target_thread );
+	    //DPRINT(1, -1, "* particle %llu pid %llu gen %d has no counterpart in thread %d\n", j, (num_t)PPP[j].pid, PPP[j].gen, target_thread );
 	  }
 	}
       else

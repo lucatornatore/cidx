@@ -8,23 +8,27 @@ FILE   *details = NULL;
 
 int     Nthreads, me;   // the number of omp threads, the thread id
 
-ull_t  *IDranges;
-_Alignas(32) pidtype_t *IDs, **all_IDs;
-ull_t   type_positions[NTYPES];
-ull_t   myNID;
-ull_t  *all_NID;
+num_t  *IDranges;
+num_t   type_positions[NTYPES];
+num_t   myNID;
+num_t  *all_NID;
 
-ull_t  *IDdomains[NTYPES];
+num_t  *IDdomains[NTYPES];
 
-_Alignas(32) particle_t *P[NTYPES]={NULL}, **P_all[NTYPES]={NULL}, *Pbase = NULL;
-_Alignas(32) list_t *List = NULL;
+_Alignas(32) pidtype_t  *IDs;
+_Alignas(32) pidtype_t **all_IDs;
+_Alignas(32) particle_t  *P[NTYPES]     ={NULL};
+_Alignas(32) particle_t **P_all[NTYPES] ={NULL};
+_Alignas(32) particle_t   *Pbase        = NULL;
+_Alignas(32) list_t *List  = NULL;
 _Alignas(32) int    *Types = NULL;
 
-ull_t   Nparts[NTYPES] = {0};
-ull_t   *Nparts_all[NTYPES] = {NULL};
-ull_t   Np_all[NTYPES] = {0};
-ull_t   Np = 0, myNp = 0;
-ull_t   Nl, myNl;
+num_t    Nparts[NTYPES+1]     = {0};
+num_t   *Nparts_all[NTYPES+1] = {NULL};
+num_t    Np_all[NTYPES+1]     = {0};
+
+
+num_t   Nl, myNl;
 
 PID_t   id_mask = 0;
 

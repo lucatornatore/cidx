@@ -59,6 +59,7 @@
 typedef unsigned int       ul_t;
 typedef unsigned long long ull_t;
 typedef long long int      ll_t;
+typedef long long int      num_t;
 
 #if defined(LONG_IDS)
 typedef unsigned long long PID_t;
@@ -76,11 +77,12 @@ typedef struct {PID_t pid; unsigned int fofid, gid;} list_t;
 
 typedef struct { PID_t pid; int gen, type; } pidtype_t;
 
-typedef struct { int id_size, particle_t_size, nfiles, dummy; ull_t Nparts, Nparts_total; } catalog_header_t;
+typedef struct { int id_size, particle_t_size, nfiles, dummy; num_t Nparts, Nparts_total; } catalog_header_t;
 
-typedef struct { int id_size, nfiles, type_is_present; ull_t Nparts, Nparts_total; } list_header_t;
+typedef struct { int id_size, nfiles, type_is_present; num_t Nparts, Nparts_total; } list_header_t;
 
 #define NTYPES 6
+#define ALL NTYPES
 
 extern int     n_stars_generations, n_stars_generations_def;
 extern int     id_bitshift;
@@ -90,35 +92,38 @@ extern FILE   *details;
 extern int     Nthreads, me;   // the number of omp threads, the thread id
 
 //  these are used to create catalogs
-extern ull_t     *IDranges;
+extern num_t     *IDranges;
 extern pidtype_t *IDs, **all_IDs;
-extern ull_t      type_positions[NTYPES];
-extern ull_t      myNID;
-extern ull_t      *all_NID;
+extern num_t      type_positions[NTYPES];
+extern num_t      myNID;
+extern num_t      *all_NID;
 
 // thise is used when we search particles in the catalogs
-extern ull_t *IDdomains[NTYPES];
+extern num_t *IDdomains[NTYPES];
 
 extern particle_t *P[NTYPES], **P_all[NTYPES], *Pbase;
 extern list_t     *List;
 extern int        *Types;
 
-extern ull_t    Nparts[NTYPES];
-extern ull_t   *Nparts_all[NTYPES];
-extern ull_t    Np_all[NTYPES];
-extern ull_t    Np, myNp;
-extern ull_t    Nl, myNl;
+extern num_t    Nparts[NTYPES+1];
+extern num_t   *Nparts_all[NTYPES+1];
+extern num_t    Np_all[NTYPES+1];
+extern num_t    Nl, myNl;
+
+#define  Np Np_all[ALL]
+#define  myNp Nparts[ALL]
+
 
 extern PID_t    id_mask;
 
-#pragma omp threadprivate(me, P, Pbase, myNp, IDs, myNID, type_positions, Nparts, myNl, List, Types)
+#pragma omp threadprivate(me, P, Pbase, IDs, myNID, type_positions, Nparts, myNl, List, Types)
 
 
 int   distribute_particles        ( void );
 int   distribute_ids              ( void );
-int   sort_thread_particles       ( ull_t * );
+int   sort_thread_particles       ( num_t * );
 int   sort_thread_idtype          ( void );
-int   assign_type_to_subfind_particles( ull_t *, ull_t * );
+int   assign_type_to_subfind_particles( num_t *, num_t * );
 PID_t get_stellargenerations_mask ( int, int * );
 int   get_stellargenerations      ( PID_t, PID_t, int );
 int   get_subfind_data            ( char *, char *);
@@ -126,30 +131,30 @@ int   get_id_data                 ( char *, char *);
 int   get_catalog_data            ( char *, int *);
 int   get_list_ids                ( char *, int );
 
-ull_t partition_P_by_pid   ( const ull_t, const ull_t, const PID_t);
-ull_t partition_IDs_by_pid ( const ull_t, const ull_t, const PID_t);
-ull_t partition_P_by_type  ( const ull_t, const ull_t, const unsigned int  );
+num_t partition_P_by_pid   ( const num_t, const num_t, const PID_t);
+num_t partition_IDs_by_pid ( const num_t, const num_t, const PID_t);
+num_t partition_P_by_type  ( const num_t, const num_t, const unsigned int  );
 
-int k_way_partition        ( const ull_t, const ull_t, const int, const int,
-			     const ull_t *, ull_t *restrict, int );
+int k_way_partition        ( const num_t, const num_t, const int, const int,
+			     const num_t *, num_t *restrict, int );
 
 
 int write_particles( FILE *, int );
 
 #if !defined(USE_LIBC_QSORT)
-int inline_qsort_particle_id_gen( void*, ull_t);
-int inline_qsort_idtype_id( void*, ull_t);
+int inline_qsort_particle_id_gen( void*, num_t);
+int inline_qsort_idtype_id( void*, num_t);
 #endif
 
 #if !defined(USE_LIBC_BSEARCH)
-extern ull_t mybsearch_in_ids     (const pidtype_t *, const ull_t, const PID_t, int *);
-extern ull_t mybsearch_in_P       (const particle_t *, const ull_t, const PID_t, int *);
+extern num_t mybsearch_in_ids     (const pidtype_t *, const num_t, const PID_t, int *);
+extern void* mybsearch_in_P       (const particle_t *, const num_t, const PID_t );
 #endif
 
 #if defined(DEBUG)
-ull_t check_partition             (const ull_t, const ull_t, const ull_t, const PID_t, const int);
-ull_t check_sorting               (const ull_t, const ull_t, const int);
-//#define MASKED_ID_DBG             4927472
+num_t check_partition             (const num_t, const num_t, const num_t, const PID_t, const int);
+num_t check_sorting               (const num_t, const num_t, const int);
+//#define MASKED_ID_DBG             73
 #endif
 
 

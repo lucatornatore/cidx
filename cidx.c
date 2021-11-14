@@ -117,10 +117,9 @@ int main( int argc, char **argv)
 	 "subf name is   %s\n",
 	 working_dir, working_dir_snap, working_dir_subf, snap_name, subf_name );
 
-  id_mask = get_stellargenerations_mask( n_stars_generations, &id_bitshift );
+  id_mask = get_stellargenerations_mask( n_stars_generations, &id_bitshift );      
   for( int t = 0; t < NTYPES; t++ )
     P_all[t] = (particle_t**)calloc( Nthreads, sizeof(particle_t*));
-      
 
   tbegin = CPU_TIME;
   
@@ -164,8 +163,6 @@ int main( int argc, char **argv)
 
       if( Nthreads > 1 )
 	printf("\tre-distributing subfind data among threads..\n");
-      for( int t = 0; t < NTYPES; t++ )
-	P_all[t] = (particle_t**)calloc( Nthreads, sizeof(particle_t*));
       tstart = CPU_TIME;
       ret = distribute_particles( );
       telapsed = CPU_TIME - tstart;
@@ -250,7 +247,7 @@ int main( int argc, char **argv)
 	dprint(0, -1, "\tchecking snap particles ids order..\n");
 	
 	{
-	  ull_t check = check_sorting( 0, myNID, 2);
+	  num_t check = check_sorting( 0, myNID, 2);
 	  if( check )
 	    printf("[err] thread %d :: sorting of snap particles "
 		   "by IDs is broken at %llu\n",
@@ -261,8 +258,8 @@ int main( int argc, char **argv)
        #pragma omp single
 	printf("\tassigning type to subfind particles..\n");
 
-	ull_t OoR, Fls;
-	ull_t fails = assign_type_to_subfind_particles( &OoR, &Fls );
+	num_t OoR, Fls;
+	num_t fails = assign_type_to_subfind_particles( &OoR, &Fls );
 
 	if( fails )
 	  printf("[err] thread %d has got %llu out-of-range "
@@ -271,14 +268,12 @@ int main( int argc, char **argv)
 
        #pragma omp barrier
 
+	free(IDs);
        #pragma omp single
 	{
-	  free(IDs);
 	  free(IDranges);
 	  free(all_NID);
 	  free(all_IDs);
-
-	  all_IDs[me] = NULL;
 	}
 
 	// ------------------------------------  
@@ -289,19 +284,29 @@ int main( int argc, char **argv)
 	printf("partitioning particles by type in each thread..\n");
         
 	{
-	  memset( type_positions, 0, sizeof(ull_t)*NTYPES );
-	  ull_t start = 0;
-	  ull_t stop = myNp;
+	  memset( type_positions, 0, sizeof(num_t)*NTYPES );
+	  num_t start = 0;
+	  num_t stop = myNp;
 
 	  telapsed = 0;
 	  for( int t = 0; t < NTYPES; t++ ) {
 	    type_positions[t] = partition_P_by_type( start, stop, t );
 	   #if defined(DEBUG)
 	    {
-	      ull_t check = check_partition(start, stop, type_positions[t], (PID_t)t, 1);
+	      num_t check = check_partition(start, stop, type_positions[t], (PID_t)t, 1);
 	      if ( check )
 		printf("[err] %d partitioning by type is broken at %llu\n",
 		       me, check);
+
+	     #if defined(MASKED_ID_DBG)
+	      for( int i = 0; i < myNp; i++ )
+		if( P[0][i].pid == MASKED_ID_DBG )
+		  dprint(0, me, "[ID DBG][P][th %d] found particle with masked id %llu, "
+			 "type %d, gen %d at pos %d\n", me,
+			 P[0][i].pid, P[0][i].type, P[0][i].gen, i);
+	      
+	     #endif
+	      
 	    }
 	   #endif	
 	    start = type_positions[t]; }
@@ -327,21 +332,30 @@ int main( int argc, char **argv)
        #pragma omp single
 	dprint(0, -1, "\tcheck of subfind particles sorting by id..\n");
 
-	ull_t ret = 0;
-	ull_t start = 0;    
+	num_t ret = 0;
+	num_t start = 0;    
 	for( int t = 0; t < NTYPES; t++ ) {
-	  ull_t stop = type_positions[t];
+	  num_t stop = type_positions[t];
 	  ret += check_sorting( start, stop, 0);
 	  start = stop; }	
 	if( ret )
 	  printf("[err] thread %d :: sorting of particles by IDs is broken (%llu)\n",
 		 me, ret);
+
+       #if defined(MASKED_ID_DBG)
+	for( int i = 0; i < myNp; i++ )
+	  if( P[0][i].pid == MASKED_ID_DBG )
+	    dprint(0, me, "[ID DBG][S][th %d] found particle with masked id %llu, "
+		   "type %d, gen %d at pos %d\n", me,
+		   P[0][i].pid, P[0][i].type, P[0][i].gen, i);	
+       #endif
+	
        #endif
 
 	#pragma omp master
 	{
-	  Nparts_all[0] = (ull_t*)malloc( NTYPES*Nthreads*sizeof(ull_t));
-	  for ( int i = 1; i < NTYPES; i++ )
+	  Nparts_all[0] = (num_t*)malloc( (NTYPES+1)*Nthreads*sizeof(num_t));
+	  for ( int i = 1; i <= NTYPES; i++ )
 	    Nparts_all[i] = Nparts_all[i-1] + Nthreads;
 	}
 	#pragma omp barrier
@@ -472,15 +486,16 @@ int main( int argc, char **argv)
 		 " I'm stopping here\n" );
 	  exit(1); } }
 
-      IDdomains[0] = (ull_t*)malloc( NTYPES * Nthreads * sizeof(ull_t) );
+      IDdomains[0] = (num_t*)malloc( NTYPES * Nthreads * sizeof(num_t) );
       for ( int i = 1; i < NTYPES; i++ )
 	IDdomains[i] = IDdomains[i-1] + Nthreads;
       
      #pragma omp parallel
       {
 	for( int t = 0; t < NTYPES; t++ )
-	  if( Nparts[t] > 0 )
-	    IDdomains[t][me] = P[t][Nparts[t]-1].pid;
+	  if( Nparts[t] > 0 ) {
+	    printf("\t* th %d setting domain[%d] to %llu\n", me, t, P[t][Nparts[t]-1].pid);
+	    IDdomains[t][me] = P[t][Nparts[t]-1].pid;}
 	  else
 	    IDdomains[t][me] = 0;
       }
@@ -503,10 +518,10 @@ int main( int argc, char **argv)
 	  if( list_types[ll] >= 0 )
 	    type_start = list_types[ll], type_end = list_types[ll]+1;
 
-	  ull_t  out_of_range = 0;
-	  ull_t  id_fails     = 0;
-	  ull_t  g_fails      = 0;
-	  ull_t  found        = 0;
+	  num_t  out_of_range = 0;
+	  num_t  id_fails     = 0;
+	  num_t  g_fails      = 0;
+	  num_t  found        = 0;
 	  double search_avg   = 0;
 	  
 	  char  name_out[ strlen(list_names[ll])+5 ];
@@ -519,14 +534,14 @@ int main( int argc, char **argv)
 	 #pragma omp parallel reduction(+:out_of_range, id_fails, g_fails, found, search_avg)
 	  {
 
-	    ull_t my_out_of_range = 0;
-	    ull_t my_id_fails     = 0;
-	    ull_t my_g_fails      = 0;
-	    ull_t my_found        = 0;
+	    num_t my_out_of_range = 0;
+	    num_t my_id_fails     = 0;
+	    num_t my_g_fails      = 0;
+	    num_t my_found        = 0;
 	    int   bs              = sizeof(PID_t)*8 - id_bitshift;
 	    
 	    double mytstart = CPU_TIME;
-	    for( ull_t j = 0; j < myNl; j++ )
+	    for( num_t j = 0; j < myNl; j++ )
 	      {
 
 		// find masked ids and generation
@@ -559,9 +574,7 @@ int main( int argc, char **argv)
 		      {
 			particle_t *res;
 		       #if !defined(USE_LIBC_BSEARCH)
-			int err;
-			ull_t pos = mybsearch_in_P(P_all[t][target_thread], Nparts_all[t][target_thread], masked_id, &err);
-			res = ( err == 0? &P_all[t][target_thread][pos] : NULL );
+			res = (particle_t*)mybsearch_in_P(P_all[t][target_thread], Nparts_all[t][target_thread], masked_id );
 			
 		       #else
 			res = bsearch( (void*)&masked_id, P_all[t][target_thread], Nparts_all[t][target_thread],
@@ -570,25 +583,18 @@ int main( int argc, char **argv)
 			
 			if( res != NULL )
 			  {
-			    // particle's been found,
-			    
-			    int _g_fail_ = 0;
-			    if( t == 0 || t == 4 ) {
-			      // let's seek for the right particles
-			      // among different generation ones
-			      particle_t *p_stop = P_all[t][target_thread] + Nparts_all[t][target_thread];
-			      while( res->pid == masked_id && res->gen > 0 ) res--;
-			      while( (res < p_stop) &&              // not beyond limits
-				     (res->pid == masked_id) &&     // still the correct masked id
-				     (res->gen != generation) )     // not yet the correct generation
-				res++;
-			      _g_fail_ += (res == p_stop) || (res->pid != masked_id); }
-			    
-			    if( !_g_fail_ ) {
-			      my_found++;
+			    // particle's been found
+
+			    particle_t *stop = P_all[t][target_thread];
+			    while( (res>stop) && (res-1)-> pid == masked_id && res-> gen > generation ) --res;
+			    stop += Nparts_all[t][target_thread];
+			    while( res < stop && (res+1)-> pid == masked_id && res-> gen < generation ) ++res;
+
+			    if(res-> gen != generation) {
+			      my_g_fails++; List[j].fofid = -1; List[j].gid = -1; }
+			    else { my_found++;
 			      List[j].fofid = res->fofid;
 			      List[j].gid   = res->gid; }
-			    else { my_g_fails++; List[j].fofid = -1; List[j].gid = -1; }
 			  }
 			else {
 			  my_id_fails++; List[j].fofid = -1; List[j].gid = -1; }
@@ -676,7 +682,7 @@ int main( int argc, char **argv)
 
   fclose( details );
   fclose( timings );
-
+      
   // un-process arguments 
   //
   {
