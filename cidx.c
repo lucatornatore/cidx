@@ -10,7 +10,7 @@ int main( int argc, char **argv)
   double tbegin;
   FILE *timings = fopen("timings", "w");
   details = fopen("details", "w");
-  
+   
  #if defined(USE_MPI)
   {
     #error "MPI support not yet implemented"
@@ -303,8 +303,7 @@ int main( int argc, char **argv)
 		if( P[0][i].pid == MASKED_ID_DBG )
 		  dprint(0, me, "[ID DBG][P][th %d] found particle with masked id %llu, "
 			 "type %d, gen %d at pos %d\n", me,
-			 P[0][i].pid, P[0][i].type, P[0][i].gen, i);
-	      
+			 (ull_t)P[0][i].pid, P[0][i].type, P[0][i].gen, i);	      
 	     #endif
 	      
 	    }
@@ -347,7 +346,7 @@ int main( int argc, char **argv)
 	  if( P[0][i].pid == MASKED_ID_DBG )
 	    dprint(0, me, "[ID DBG][S][th %d] found particle with masked id %llu, "
 		   "type %d, gen %d at pos %d\n", me,
-		   P[0][i].pid, P[0][i].type, P[0][i].gen, i);	
+		   (ull_t)P[0][i].pid, P[0][i].type, P[0][i].gen, i);	
        #endif
 	
        #endif
@@ -494,7 +493,6 @@ int main( int argc, char **argv)
       {
 	for( int t = 0; t < NTYPES; t++ )
 	  if( Nparts[t] > 0 ) {
-	    printf("\t* th %d setting domain[%d] to %llu\n", me, t, P[t][Nparts[t]-1].pid);
 	    IDdomains[t][me] = P[t][Nparts[t]-1].pid;}
 	  else
 	    IDdomains[t][me] = 0;
@@ -580,6 +578,7 @@ int main( int argc, char **argv)
 			res = bsearch( (void*)&masked_id, P_all[t][target_thread], Nparts_all[t][target_thread],
 				       sizeof(particle_t), compare_pid_with_particle_t );
 		       #endif
+
 			
 			if( res != NULL )
 			  {
@@ -591,12 +590,28 @@ int main( int argc, char **argv)
 			    while( res < stop && (res+1)-> pid == masked_id && res-> gen < generation ) ++res;
 
 			    if(res-> gen != generation) {
+			     #if defined(DEBUG) && defined(MASKED_ID_DBG)
+			      if( masked_id == MASKED_ID_DBG)
+				printf("### %d %d\n", res->type, res->gen);
+			     #endif
+
 			      my_g_fails++; List[j].fofid = -1; List[j].gid = -1; }
-			    else { my_found++;
+			    else {
+			     #if defined(DEBUG) && defined(MASKED_ID_DBG)
+			      if( masked_id == MASKED_ID_DBG)
+				printf("### %d %d\n", res->type, res->gen);
+			     #endif
+
+			      my_found++;
 			      List[j].fofid = res->fofid;
 			      List[j].gid   = res->gid; }
 			  }
 			else {
+			  		       #if defined(DEBUG) && defined(MASKED_ID_DBG)
+			if( masked_id == MASKED_ID_DBG)
+			  printf("### %d %d\n", res->type, res->gen);
+		       #endif
+
 			  my_id_fails++; List[j].fofid = -1; List[j].gid = -1; }
 		      }
 		    else
@@ -662,7 +677,7 @@ int main( int argc, char **argv)
 		 found, Nl);
 	  
 	  if ( out_of_range || g_fails || id_fails )
-	    dprint(0, 0, "\t%llu ids were out-of-range\n"
+	    dprint(1, 0, "\t%llu ids were out-of-range\n"
 		   "\t%llu ids have not been found in catalogs\n"
 		   "\t%llu ids have not been found with exact generation\n",
 		   out_of_range, id_fails, g_fails );

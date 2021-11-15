@@ -88,6 +88,7 @@ extern int     n_stars_generations, n_stars_generations_def;
 extern int     id_bitshift;
 extern int     verbose;
 extern FILE   *details;
+//extern FILE   *pdetails;
 
 extern int     Nthreads, me;   // the number of omp threads, the thread id
 
@@ -154,7 +155,7 @@ extern void* mybsearch_in_P       (const particle_t *, const num_t, const PID_t 
 #if defined(DEBUG)
 num_t check_partition             (const num_t, const num_t, const num_t, const PID_t, const int);
 num_t check_sorting               (const num_t, const num_t, const int);
-//#define MASKED_ID_DBG             73
+//#define MASKED_ID_DBG             3093217
 #endif
 
 

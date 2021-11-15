@@ -5,6 +5,7 @@ int     n_stars_generations, n_stars_generations_def = 4;
 int     id_bitshift;
 int     verbose = 0;
 FILE   *details = NULL;
+//FILE   *pdetails = NULL;
 
 int     Nthreads, me;   // the number of omp threads, the thread id
 

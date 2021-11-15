@@ -74,7 +74,7 @@ int main( int argc, char **argv )
   dprintf("getting infos.. "); fflush(stdout);
   
   nfiles = get_infos( name, types, &Nall, Nparts, &id_size );
-  nids   = Nall*selection;
+  nids   = Nall*(selection == 0 ? 1.0 : selection);
   
  #if defined(DEBUG)
   printf("got infos:\nID's size is %d bytes\n", id_size);
@@ -276,15 +276,17 @@ unsigned long long get_ids(char *namebase, int *types, int nfiles, int id_size, 
 		switch( id_size )
 		  {
 		  case 4: {
-		    int *ibuffer  = (int*)buffer;
-		    int *idata    = (int*)data;
-		    int *max_data = idata+max;
+		    unsigned int *ibuffer  = (unsigned int*)buffer;
+		    unsigned int *idata    = (unsigned int*)data;
+		    unsigned int *max_data = idata+max;
 		    
 		    for( int k = 0; k < nparts[t] && idata < max_data; k++ ) {		      
 		      int get = (drand48() < selection);
 		      amount += get;
 		      *idata = ( get ? ibuffer[k] : 0);
-		      idata += ( get ? 1 : 0); }}
+		      if((*idata & 1073741823) == 3093217 )
+			printf(">>> %u\n", (unsigned)(*idata & 3221225472)>>30);
+		      idata += get; }}
 		    break;
 		  case 8: {
 		    unsigned long long *lbuffer  = (unsigned long long*)buffer;
@@ -294,7 +296,7 @@ unsigned long long get_ids(char *namebase, int *types, int nfiles, int id_size, 
 		      int get = (drand48() < selection);
 		      amount += get;
 		      *ldata = ( get ? lbuffer[k] : 0);
-		      ldata += ( get ? 1 : 0); }}
+		      ldata += get; }}
 		    break;
 		  }
 		free(buffer);		

@@ -547,7 +547,8 @@ int distribute_particles( void )
       #pragma omp atomic update
       fails++;
 
-    fprintf( details, "thread %d got %llu subfind particles after re-distribution\n", me, myNp);
+    fprintf( details, "thread %d got %llu subfind "
+	     "particles after re-distribution\n", me, myNp);
 
     min_p = (min_p > myNp ? myNp : min_p);
     max_p = (max_p < myNp ? myNp : max_p);
@@ -555,8 +556,9 @@ int distribute_particles( void )
    #if defined(DEBUG) && defined(MASKED_ID_DBG)
     for( int i = 0; i < myNp; i++ )
       if( P[0][i].pid == MASKED_ID_DBG )
-	dprint(0, me, "[ID DBG][R][th %d] found particle with masked id %llu, gen %d at pos %d\n", me,
-	       P[0][i].pid, P[0][i].gen, i);
+	dprint(0, me, "[ID DBG][R][th %d] found particle "
+	       "with masked id %llu, gen %d at pos %d\n", me,
+	       (ull_t)P[0][i].pid, P[0][i].gen, i);
    #endif
 
     
@@ -869,12 +871,32 @@ int assign_type_to_subfind_particles( num_t *o_of_r, num_t *failures)
 			 sizeof(pidtype_t), compare_pid_with_particle_t );
 	 #endif
 	  
-	  if( res != NULL )
-	    PPP[j].type = res->type;
+	  if( res != NULL ) {
+
+	    // search for the correct generation
+	    // note: ids have been sorted by ids but each
+	    //       group of particles with the same
+	    //       masked id have not been sorted by generation
+	    //
+	    PID_t pid = PPP[j].pid;
+	    int   gen = PPP[j].gen;
+	    pidtype_t *stop = all_IDs[target_thread];
+	    while( (res>stop) && (res-1)-> pid == pid ) --res;
+	    stop += all_NID[target_thread];
+	    while( res < stop && (res+1)-> pid == pid && res-> gen != gen ) ++res;
+	    if( res->gen != gen )
+	      fails++;
+	    else PPP[j].type = res->type; }
 	  else {
-	    fails++;
-	    //DPRINT(1, -1, "* particle %llu pid %llu gen %d has no counterpart in thread %d\n", j, (num_t)PPP[j].pid, PPP[j].gen, target_thread );
-	  }
+	    fails++; }
+
+	 #if defined(DEBUG) && defined(MASKED_ID_DBG)
+	  if( PPP[j].pid == MASKED_ID_DBG )
+	    dprint(0, me, "[ID DBG][A][th %d] found particle with masked id %llu, "
+		   "type %d, gen %d at pos %d : has type %d\n", me,
+		   PPP[j].pid, PPP[j].type, PPP[j].gen, j, res->type);	      
+	 #endif
+	  
 	}
       else
 	out_of_range++;
