@@ -118,9 +118,9 @@ Searching for a list of particles can be done by:
 
 There are 2 types of list file: a file that contains only the IDs of the particles and a file that contains the pair `{id, type}` where `type` is the `[0:5]` type of each particle.
 The first type of file, that which contains only the IDs, has the very simple binary format:
-`id_size:int4`,`num_of_particles:int4`,`[id0, id1, id2, ...]:id_type`
+`id_size:int4`,`num_of_particles:int8`,`[id0, id1, id2, ...]:id_type`
 
-where `id_size` is a 4bytes integer that specifies the size in bytes of the IDs stored in the file; the size may be either 4 or 8. `num_of_particles` is the number of particles that are in the file.
+where `id_size` is a 4bytes integer that specifies the size in bytes of the IDs stored in the file; the size may be either 4 or 8. `num_of_particles` is the number of particles that are in the file and it must be an int8.
 The subsequent IDs are stored linearly, and `id_type` is either `uint4_t` or `uint8_t`, depending on the value of `id_size`.
 
 <span style="color: red"> TBD: how to specify multiple-file list </span>
