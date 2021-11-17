@@ -104,7 +104,7 @@ Searching for a list of particles can be done by:
     psth/to/cidx -s -num nnn -list my_list_file [type]
     ```
 
-    where `my_list_file` is the name of the list file and `type` is a specifier that, if needed, informs `cidx` that all the ids in the file are of the given type.
+    where `my_list_file` is the name of the list file (the path to the file must be included if different than ./) and `type` is a specifier that, if needed, informs `cidx` that all the ids in the file are of the given type.
     Not specifying `type` or specifying `-1` means that the IDs refer to particles of mixed types.
     Entering `type` `-2` amounts to specify that the file contains type information for each particle.
     _(see below “how to create a list of IDs”)_
