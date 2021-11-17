@@ -6,7 +6,7 @@ EXEC_NAME  =cidx
 
 LONG_IDS   =off
 PRODUCTION =on
-DEBUG      =of
+DEBUG      =off
 
 DEBUG_INFO =off
 SANITIZE   =off

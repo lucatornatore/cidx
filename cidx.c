@@ -5,7 +5,7 @@
 
 int main( int argc, char **argv)
 {
-  struct timespec ts;
+  _Alignas(32) struct timespec ts;
   double tstart, telapsed;
   double tbegin;
   FILE *timings = fopen("timings", "w");

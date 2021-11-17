@@ -101,11 +101,14 @@ typedef struct {
 int seek_block ( FILE *file, char name[5] )
 /*
  * This function get to the block specified by name
- * in a format-2 snapshot file pointed by *file
+ * in a format-2 file pointed by *file.
  *
  * RETURN VALUE:
  * 0 if the seeking is not successful, otherwiase
- * the 4-bytes long tag at the begin of the data block
+ * the 4-bytes long tag at the begin of the data block.
+ * The file position is set to the begin if the data 
+ * block, right after the length tag.
+ *
  */
 {
   head_t        head;
@@ -1048,6 +1051,11 @@ num_t get_catalog_data_from_file(char *name, int nfiles, int type, num_t AllN )
      #pragma omp atomic update
       failures++; }
 
+    // in the following block we make sure that the group of
+    // particle_t entries that refer to the same masked_id
+    // belong to the same task, in order to ease the search
+    // operations afterwards.
+    //    
    #pragma omp barrier
    #pragma omp for ordered schedule(static)
     for( int th = 0; th < Nthreads; th++ )
@@ -1055,11 +1063,25 @@ num_t get_catalog_data_from_file(char *name, int nfiles, int type, num_t AllN )
 	#pragma omp ordered
 	{
 	  if( signal ) {
+	    // some of my initial entries
+	    // have been moved by the previous
+	    // me-1 thread;
+	    // the number of entries is stored
+	    // in the variable signal.
+	    // Hence, here we discard the first
+	    // [signal] entries
+	    //
 	    myNp            -= signal;
 	    Nparts[type]    -= signal;
 	    P[type]         += signal;
 	    P_all[type][me] += signal; }
+	  
 	  if( th < Nthreads-1 ) {
+	    // not the least thread,
+	    // check whether we must unify
+	    // the last particle and the
+	    // first ones of the next thread
+	    //
 	    num_t n    = 0;
 	    num_t np   = Nparts[type];
 	    while( P[type][np-1].pid == P_all[type][th+1][n].pid )
@@ -1072,6 +1094,7 @@ num_t get_catalog_data_from_file(char *name, int nfiles, int type, num_t AllN )
       }
     
    #if defined(MASKED_ID_DBG)
+    // track a given masked id for debugging purposes
     for( int i = 0; i < myNp; i++ )
       if( P[type][i].pid == MASKED_ID_DBG )
 	dprint(0, me, "[ID DBG][S][th %d] found particle with masked id %llu, "
