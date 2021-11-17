@@ -614,10 +614,12 @@ int main( int argc, char **argv)
 
 			  my_id_fails++; List[j].fofid = -1; List[j].gid = -1; }
 		      }
-		    else
+		    else {
 		      // oops, it seems that an invalid id
 		      // has been provided
 		      my_out_of_range++;
+		      List[j].fofid = -1; List[j].gid = -1;
+		    }
 		  }
 	      }
 	    double mytelapsed = CPU_TIME - mytstart;
