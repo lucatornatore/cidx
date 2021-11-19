@@ -53,11 +53,11 @@ char catalog_name[CATALOG_NAME_SIZE];
 char list_name[CATALOG_NAME_SIZE];
 char snapnum[NUM_SIZE];
 
-char **list_names = NULL;
-int   *list_types = NULL;
-int    Nlists = 0;
-int    action = UNDEFINED;
-int    help_given = 0;
+char *list_names[MAX_N_LISTS] = {NULL};
+int   list_types[MAX_N_LISTS] = {0};
+int   Nlists = 0;
+int   action = UNDEFINED;
+int   help_given = 0;
 
 // note: in the following functions, "mode" should be passed
 // as argc from the main, so that is is > 0 and also conveys
@@ -152,9 +152,15 @@ int set_list( char **argv, int n, int mode )
 {
   if( mode > 0 )
     {
+      if( Nlists == MAX_N_LISTS-1 )
+	{
+	  printf("[reading args][set list] too many list files: "
+		 "you can specify %d lists at maximum\n"
+		 "%s file will be ignored\n",
+		 *(argv + ++n));
+	  return 0;
+	}
       Nlists++;
-      list_names = (char **)realloc( list_names, sizeof(char *)*Nlists );
-      list_types = (int *)realloc( list_types, sizeof(int)*Nlists );
       int len = strlen(*(argv + ++n)) + 1;
       list_names[Nlists-1] = (char*)malloc( len );
       snprintf( list_names[Nlists-1], len, "%s", *(argv + n ));
@@ -165,10 +171,8 @@ int set_list( char **argv, int n, int mode )
     }
   else if ( mode < 0 )
     {
-      free( list_types );
       for ( int l = Nlists-1; l >= 0; l-- )
 	free( list_names[l] );
-      free( list_names );
     }
   
   return n;

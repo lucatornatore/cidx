@@ -28,9 +28,15 @@
 #include <mpi.h>
 #endif
 
-#define CPU_TIME (clock_gettime( CLOCK_THREAD_CPUTIME_ID, &ts ), \
-		  (double)ts.tv_sec +				 \
-		  (double)ts.tv_nsec * 1e-9)
+#define CPU_RTIME ({_Alignas(32) struct timespec ts; double v;		\
+      v=(clock_gettime( CLOCK_REALTIME, &ts ),				\
+	 (double)ts.tv_sec +						\
+	 (double)ts.tv_nsec * 1e-9); v;})
+
+#define CPU_TIME ({_Alignas(32) struct timespec ts; double v;		\
+      v=(clock_gettime( CLOCK_THREAD_CPUTIME_ID, &ts ),			\
+	 (double)ts.tv_sec +						\
+	 (double)ts.tv_nsec * 1e-9); v;})
 
 #define ALIGN 32
 
@@ -196,9 +202,10 @@ extern char snap_name[NAME_SIZE+NUM_SIZE];
 extern char subf_name[NAME_SIZE+NUM_SIZE];
 extern char catalog_name[CATALOG_NAME_SIZE];
 extern char snapnum[NUM_SIZE];
-extern char **list_names;
-extern int   *list_types;
-extern int    Nlists;
+#define MAX_N_LISTS 10
+extern char *list_names[MAX_N_LISTS];
+extern int   list_types[MAX_N_LISTS];
+extern int   Nlists;
 
 #define PPP   P[0]
 

@@ -1,5 +1,15 @@
+#myCC=gcc
+#myCC=clx
 
-CC         = gcc
+arch := $(shell uname -p)
+$(info ${arch} architecture found)
+ifeq ($(arch),ppc64le)
+	myCC=xlc
+else 
+	myCC=gcc
+endif
+CC=$(myCC)
+$(info using $(CC) c compiler)
 FPIC       = "-fPIC"
 
 EXEC_NAME  =cidx
@@ -35,7 +45,14 @@ $(info internal debugging checks on)
 OPT += -DDEBUG
 endif
 
-COMMON_CFLAGS = -std=c11 -fopenmp -W -Wall -I ./ $(OPT) $(FPIC)
+
+ifeq ($(CC),gcc)
+	OPENMP = -fopenmp 
+else ifeq ($(CC),xlc)
+	OPENMP = -qsmp=omp
+endif
+
+COMMON_CFLAGS = -std=c11 $(OPENMP) -W -Wall -I ./ $(OPT) $(FPIC)
 
 # ----------------------------------------------------------------------------
 
@@ -49,7 +66,11 @@ endif
 
 ifeq ($(PRODUCTION),on)
 $(info compiling for production)
+	ifeq (($CC),gcc)
 	OPTIMIZE_FLAGS = -O3 -march=native -faggressive-loop-optimizations
+	else ifeq ($(CC),xlc)
+	OPTIMIZE_FLAGS = -O5 -qnostrict -qarch=auto -qtune=auto -qhot
+	endif
 	CFLAGS = $(DBG_INFO) $(OPTIMIZE_FLAGS) -fno-stack-protector $(COMMON_CFLAGS) $(SANITIZE_FLAGS)
 	CIDX = $(EXEC_NAME)
 else
@@ -86,3 +107,4 @@ clean:
 	@echo "cleaning objects files: "	
 	@echo $(OBJS) $(CIDX) 
 	@rm -f $(OBJS) $(CIDX) warnings
+

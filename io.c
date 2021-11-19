@@ -983,6 +983,8 @@ num_t get_catalog_data_from_file(char *name, int nfiles, int type, num_t AllN )
     for ( int f = 0; f < go; f++ )
       if( files[f].ptr != NULL )
 	fclose(files[f].ptr);
+    if( files != NULL )
+      free(files);
     return -1; }
 
   int          signal   = 0;
@@ -1160,28 +1162,26 @@ int get_list_ids ( char *name, int file_type )
     }
   
   Nl = header.Nparts_total;
-  dprint(1, 0, "%llu particles from list file %s\n",
+  dprint(1, 0, "[read list] %llu particles from list file %s\n",
 	 header.Nparts_total, name );
-
-  
- #pragma omp parallel
-  {
-    int rem = (int)(Nl % (num_t)Nthreads);
-    myNl    = Nl / Nthreads + (me < rem);
-  }
-
 
   // allocate memory to hold all the particles
   // and set-up pointers for each particles type
   //
   int failures = 0;
+  
  #pragma omp parallel
   {
+    int rem = (int)(Nl % (num_t)Nthreads);
+    myNl    = Nl / Nthreads + (me < rem);
+
     List = (list_t*)calloc( myNl, sizeof(list_t));
     if( file_type == -1 )
       Types = (int*)calloc( myNl, sizeof(int));
    #pragma omp atomic update
     failures += (List == NULL);
+    dprint(2, me, "[read list] thread %d allocated %llu bytes at %p\n",
+	   me, myNl * sizeof(list_t), List);
   }
 
   if ( failures )

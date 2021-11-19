@@ -5,7 +5,7 @@
 
 int main( int argc, char **argv)
 {
-  _Alignas(32) struct timespec ts;
+  
   double tstart, telapsed;
   double tbegin;
   FILE *timings = fopen("timings", "w");
@@ -121,7 +121,7 @@ int main( int argc, char **argv)
   for( int t = 0; t < NTYPES; t++ )
     P_all[t] = (particle_t**)calloc( Nthreads, sizeof(particle_t*));
 
-  tbegin = CPU_TIME;
+  tbegin = CPU_RTIME;
   
 
   
@@ -500,32 +500,43 @@ int main( int argc, char **argv)
       
       // get the ids from the list
       //
-      double *search_timings = (double*)calloc( Nthreads, sizeof(double) );
-      memset( search_timings, 0, sizeof(double)*Nthreads);
-      
+      _Alignas(32) double search_timings[Nthreads];
+      memset( search_timings, 0, Nthreads*sizeof(double));
+
       for ( int ll = 0; ll < Nlists; ll++ )
 	{
-	  dprint( 0, 0, "getting ids from list file %s..\n", list_names[ll]);
+	  dprint( 0, 0, "getting ids from list file %s, list type %d..\n", list_names[ll], list_types[ll]);
 	  tstart = CPU_TIME;
 	  get_list_ids( list_names[ll], list_types[ll] );
 	  telapsed = CPU_TIME - tstart;
 	  PRINT_TIMINGS( "getting ids from list", "s", telapsed );
-	  dprint( 0, 0, "%llu found\n", Nl);
-
-	  int type_start = 0, type_end = NTYPES;
-	  if( list_types[ll] >= 0 )
-	    type_start = list_types[ll], type_end = list_types[ll]+1;
+	  dprint( 0, 0, "\t%llu ids found\n", Nl);
+	  
+	  int type_start = 0;
+	  int type_end = NTYPES;
+	  if( list_types[ll] >= 0 ) {
+	    type_start = list_types[ll]; type_end = list_types[ll]+1;}
 
 	  num_t  out_of_range = 0;
 	  num_t  id_fails     = 0;
 	  num_t  g_fails      = 0;
 	  num_t  found        = 0;
 	  double search_avg   = 0;
-	  
-	  char  name_out[ strlen(list_names[ll])+5 ];
-	  snprintf( name_out, strlen(catalog_name)+5 , "%s.fh", list_names[ll] );
-	  FILE *list_out = fopen( name_out, "w" );	  
 
+	  char  *name_out = (char*)malloc( strlen(list_names[ll])+5 );
+	  snprintf( name_out, strlen(catalog_name)+5 , "%s.fh", list_names[ll] );
+	  //FILE *list_out = fopen( name_out, "w" );
+	  FILE *list_out = fopen( "list.out", "w" );
+	  if( list_out == NULL )
+	    {
+	      printf("[search] it was impossible to create output file %s for list %s, I skip it\n",
+		     name_out, list_names[ll]);
+	      #pragma omp parallel
+	      free(List);
+	      continue;
+	    }
+	  free(name_out);
+	  
 	  dprint(0, 0, "searching for ids..\n" ); fflush(stdout);
 	  
 	  tstart = CPU_TIME;
@@ -623,17 +634,22 @@ int main( int argc, char **argv)
 		  }
 	      }
 	    double mytelapsed = CPU_TIME - mytstart;
+	   #pragma omp atomic update
 	    search_timings[me] += mytelapsed;   // a little bit of false-sharing,
 						// but that has a negligible impact on performance.
 	    
 	   #pragma omp single
-	    dprint(0, me, "writing file..\n");
+	    dprint(1, me, "waiting for all the threads..\n");
+	    
+	   #pragma omp single
+	    dprint(0, me, "writing output file..\n", Nthreads);
 	   #pragma omp for ordered
-	    for( int th = 0; th < Nthreads; th++ ) 
-	      fwrite( List, sizeof(list_t), myNl, list_out);
+	    for( int th = 0; th < Nthreads; th++ )
+	     #pragma omp ordered
+		fwrite( List, sizeof(list_t), myNl, list_out);
 
 	   #pragma omp barrier
-	   #pragma omp single
+	   #pragma omp master
 	    fclose(list_out);
 	    
 	    if ( List != NULL ) { free( List ); List = NULL; }
@@ -669,13 +685,12 @@ int main( int argc, char **argv)
 	    for ( int t = 0; t < Nthreads; t++ ) {
 	      mint = (mint > search_timings[t] ? search_timings[t] : mint );
 	      maxt = (maxt < search_timings[t] ? search_timings[t] : maxt ); }
-	    free( search_timings );
 	    PRINT_TIMINGS( "searching for lists (imb)", "%", (maxt-mint)/search_avg*100 );
-	    //PRINT_TIMINGS( "searching for lists (min)", "s", mint );
-	    //PRINT_TIMINGS( "searching for lists (max)", "s", maxt );
+	    PRINT_TIMINGS( "searching for lists (min)", "s", mint );
+	    PRINT_TIMINGS( "searching for lists (max)", "s", maxt );
 	  }
 
-	  dprint(0, 0, "%llu / %llu particles found\n",
+	  printf("%llu / %llu particles found\n",
 		 found, Nl);
 	  
 	  if ( out_of_range || g_fails || id_fails )
@@ -694,7 +709,7 @@ int main( int argc, char **argv)
 
 
 
-  telapsed = CPU_TIME - tbegin;
+  telapsed = CPU_RTIME - tbegin;
   PRINT_TIMINGS( "total time", "s", telapsed );
 
   fclose( details );
