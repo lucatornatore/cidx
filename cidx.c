@@ -644,7 +644,9 @@ int main( int argc, char **argv)
 	   #pragma omp single
 	    {
 	      dprint(0, me, "writing output file..\n", Nthreads);
-	      long long int N = myNl;
+	      dprint(0, me, "writing %llu particles, with PID size %d, item size %d\n",
+		     (unsigned long long)Nl, sizeof(PID_t), sizeof(list_t));
+	      long long int N = Nl;
 	      fwrite( &N, sizeof(long long), 1, list_out );
 	      int PID_size = sizeof( PID_t );
 	      fwrite( &PID_size, sizeof(int), 1, list_out );
