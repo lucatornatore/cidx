@@ -510,7 +510,7 @@ int main( int argc, char **argv)
 	  get_list_ids( list_names[ll], list_types[ll] );
 	  telapsed = CPU_TIME - tstart;
 	  PRINT_TIMINGS( "getting ids from list", "s", telapsed );
-	  dprint( 0, 0, "\t%llu ids found\n", Nl);
+	  dprint( 0, 0, "\t%llu ids found in the list file\n", Nl);
 	  
 	  int type_start = 0;
 	  int type_end = NTYPES;
@@ -642,7 +642,13 @@ int main( int argc, char **argv)
 	    dprint(1, me, "waiting for all the threads..\n");
 	    
 	   #pragma omp single
-	    dprint(0, me, "writing output file..\n", Nthreads);
+	    {
+	      dprint(0, me, "writing output file..\n", Nthreads);
+	      long long int N = myNl;
+	      fwrite( &N, sizeof(long long), 1, list_out );
+	      int PID_size = sizeof( PID_t );
+	      fwrite( &PID_size, sizeof(int), 1, list_out );
+	    }
 	   #pragma omp for ordered
 	    for( int th = 0; th < Nthreads; th++ )
 	     #pragma omp ordered
