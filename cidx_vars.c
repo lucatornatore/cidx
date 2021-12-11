@@ -13,6 +13,7 @@ num_t  *IDranges;
 num_t   type_positions[NTYPES];
 num_t   myNID;
 num_t  *all_NID;
+fof_table_t *fof_table;
 
 num_t  *IDdomains[NTYPES];
 
@@ -50,6 +51,7 @@ char catalog_base[NAME_SIZE] = "catalog";
 char snap_name[NAME_SIZE+NUM_SIZE];
 char subf_name[NAME_SIZE+NUM_SIZE];
 char catalog_name[CATALOG_NAME_SIZE];
+char catalog_table_name[CATALOG_NAME_SIZE];
 char list_name[CATALOG_NAME_SIZE];
 char snapnum[NUM_SIZE];
 
@@ -82,6 +84,16 @@ int action_search_particles( char **argv, int n, int mode )
   UNUSED(mode);
   if( mode > 0 )
     action |= SEARCH_PARTICLES;
+  return n;
+}
+
+int action_make_foftable( char **argv, int n, int mode )
+{
+  UNUSED(argv);
+  UNUSED(n);
+  UNUSED(mode);
+  if( mode > 0 )
+    action |= BUILD_FOF_TABLE;
   return n;
 }
 
@@ -157,6 +169,7 @@ int set_list( char **argv, int n, int mode )
 	  printf("[reading args][set list] too many list files: "
 		 "you can specify %d lists at maximum\n"
 		 "%s file will be ignored\n",
+		 MAX_N_LISTS,
 		 *(argv + ++n));
 	  return 0;
 	}
@@ -243,6 +256,8 @@ arg_t args[] = {
 		{"-s", "", "", "", 1, action_search_particles },
 		{"-sp", "", "", "", 1, action_search_particles },
 		{"-search", "", "", "", 1, action_search_particles },
+
+		{"-t", "", "", "", 2, action_make_foftable },
 
 		{"-snapf", "%%s+snapnum", "specify the basename of snapshot files", "[snap name]", -1, set_snapf },
 

@@ -109,6 +109,8 @@ int main( int argc, char **argv)
   snprintf( subf_name, NAME_SIZE+NUM_SIZE, "%s%s", subf_base, snapnum );
   snprintf( catalog_name, CATALOG_NAME_SIZE, "%s/%s_%s_type_",
 	    working_dir_subf, snapnum, catalog_base );
+  snprintf( catalog_table_name, CATALOG_NAME_SIZE, "%s/%s_%s_table_fof",
+	    working_dir_subf, snapnum, catalog_base );
 
   DPRINT(3,0, "working dir is %s\n"
 	 "snap dir is    %s\n"
@@ -136,13 +138,15 @@ int main( int argc, char **argv)
 							       * ------------------------ */
     {
 
+      num_t HowMany[4];
+      
       // ------------------------------------
       // get the subfind data
       //
 
       printf("loading subfind data..\n");
       tstart = CPU_TIME;
-      ret = get_subfind_data( working_dir_subf, subf_name );
+      ret = get_subfind_data( working_dir_subf, subf_name, &HowMany[0] );
       telapsed = CPU_TIME - tstart;
       PRINT_TIMINGS( "getting subfind data", "s", telapsed );      
       
@@ -276,6 +280,42 @@ int main( int argc, char **argv)
 	  free(all_IDs);
 	}
 
+
+	// ------------------------------------  
+	//  create a catalog table if required;
+	//  that is a table which summarize how
+	//  many particles of each type belong
+	//  to every fof and galaxy
+	//
+
+	if( action & BUILD_FOF_TABLE )
+	  {	    
+	   #pragma omp master
+	    {
+	      printf("building fof table..\n");
+	      fof_table = (fof_table_t*)calloc(HowMany[0] , sizeof(fof_table_t));
+	    }
+	    
+	   #pragma omp barrier
+	    
+	    make_fof_table( fof_table, 1 );
+	    
+	   #pragma omp barrier
+	    
+	   #pragma omp single
+	    {
+	      FILE *file = fopen( catalog_table_name, "w" );
+	      
+	      for( num_t i = 0; i < HowMany[0]; i++ ) {
+		fprintf(file, "%10llu\t%llu", i, fof_table[i].TotN);
+		for( int j = 0; j < NTYPES; j++ )
+		  fprintf(file, "\t%10llu", fof_table[i].Nparts[j] );
+		fprintf(file, "\n"); }	    
+	      
+	      fclose(file);	  
+	    }
+	  }
+	
 	// ------------------------------------  
 	//  partition the data in each thread by particle type
 	//
@@ -643,8 +683,8 @@ int main( int argc, char **argv)
 	    
 	   #pragma omp single
 	    {
-	      dprint(0, me, "writing output file..\n", Nthreads);
-	      dprint(0, me, "writing %llu particles, with PID size %d, item size %d\n",
+	      dprint(0, me, "writing output file..\n");
+	      dprint(0, me, "writing %llu particles, with PID size %lu, item size %lu\n",
 		     (unsigned long long)Nl, sizeof(PID_t), sizeof(list_t));
 	      long long int N = Nl;
 	      fwrite( &N, sizeof(long long), 1, list_out );

@@ -20,4 +20,7 @@ particles = np.fromfile( f, dtype=ptype )
 
 print(particles[0:(10 if (N>10) else N)])
 
+# find particles that belong to fof 1
+find_fof=particle[particles['fof'] == 1]
+
 f.close()

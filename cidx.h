@@ -73,6 +73,9 @@ typedef unsigned long long PID_t;
 typedef unsigned int       PID_t;
 #endif
 
+#define NTYPES 6
+#define ALL NTYPES
+
 typedef struct {PID_t pid; unsigned int type, gen, fofid, gid;} particle_t;     // pid   is the gadget's ID of the particle
                                                                                 // fofid is the cardinal number of the fof the particle belongs to, sequentially read from the sub_ files 
 								                // gid   is the halo number the particle belong to, sequentially read from the sub_ files
@@ -87,8 +90,8 @@ typedef struct { int id_size, particle_t_size, nfiles, dummy; num_t Nparts, Npar
 
 typedef struct { int id_size, nfiles, type_is_present; num_t Nparts, Nparts_total; } list_header_t;
 
-#define NTYPES 6
-#define ALL NTYPES
+typedef struct { num_t fof_id; num_t TotN, Nparts[NTYPES]; } fof_table_t;
+
 
 extern int     n_stars_generations, n_stars_generations_def;
 extern int     id_bitshift;
@@ -99,11 +102,12 @@ extern FILE   *details;
 extern int     Nthreads, me;   // the number of omp threads, the thread id
 
 //  these are used to create catalogs
-extern num_t     *IDranges;
-extern pidtype_t *IDs, **all_IDs;
-extern num_t      type_positions[NTYPES];
-extern num_t      myNID;
-extern num_t      *all_NID;
+extern num_t       *IDranges;
+extern pidtype_t   *IDs, **all_IDs;
+extern num_t        type_positions[NTYPES];
+extern num_t        myNID;
+extern num_t       *all_NID;
+extern fof_table_t *fof_table;
 
 // thise is used when we search particles in the catalogs
 extern num_t *IDdomains[NTYPES];
@@ -133,10 +137,11 @@ int   sort_thread_idtype          ( void );
 int   assign_type_to_subfind_particles( num_t *, num_t * );
 PID_t get_stellargenerations_mask ( int, int * );
 int   get_stellargenerations      ( PID_t, PID_t, int );
-int   get_subfind_data            ( char *, char *);
+int   get_subfind_data            ( char *, char *, num_t [4]);
 int   get_id_data                 ( char *, char *);
 int   get_catalog_data            ( char *, int *);
 int   get_list_ids                ( char *, int );
+int   make_fof_table              ( fof_table_t*, int );
 
 num_t partition_P_by_pid   ( const num_t, const num_t, const PID_t);
 num_t partition_IDs_by_pid ( const num_t, const num_t, const PID_t);
@@ -201,6 +206,7 @@ extern char catalog_base[NAME_SIZE];
 extern char snap_name[NAME_SIZE+NUM_SIZE];
 extern char subf_name[NAME_SIZE+NUM_SIZE];
 extern char catalog_name[CATALOG_NAME_SIZE];
+extern char catalog_table_name[CATALOG_NAME_SIZE];
 extern char snapnum[NUM_SIZE];
 #define MAX_N_LISTS 10
 extern char *list_names[MAX_N_LISTS];
@@ -214,9 +220,10 @@ extern int   Nlists;
 #define ARG_DFLT      30
 #define ARG_EX_SIZE   120
 
-#define UNDEFINED        0
-#define CREATE_CATALOGS  1
-#define SEARCH_PARTICLES 2
+#define UNDEFINED           0
+#define CREATE_CATALOGS     1
+#define SEARCH_PARTICLES    2
+#define BUILD_FOF_TABLE     4
 
 
 typedef int (*action_t)(char **, int, int);

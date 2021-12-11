@@ -775,6 +775,64 @@ int distribute_ids( void )
 }
 
 
+
+
+int make_fof_table( fof_table_t *table, int mode )
+{
+
+  long long int last = -1;
+  fof_table_t fof_record = {0};
+  fof_record.fof_id = PPP[0].fofid;
+  
+  for( num_t i = 0; i < myNp; i++ )
+    {
+      if( PPP[i].fofid != fof_record.fof_id )
+	{
+	  DPRINT("thread %d updating halo %llu\n",
+		me, fof_record.fof_id );
+	  last = fof_record.fof_id;
+	 #pragma omp atomic update
+	  table[fof_record.fof_id].TotN += fof_record.TotN;
+	  fof_record.TotN = 0;
+	  for( int j = 0; j < NTYPES; j++) {
+	   #pragma omp atomic update
+	    table[fof_record.fof_id].Nparts[j] += fof_record.Nparts[j];
+	    fof_record.Nparts[j] = 0; }
+
+	  fof_record.fof_id = PPP[i].fofid;
+	}
+
+      fof_record.TotN++;
+      switch(mode)
+	{
+	case 1: fof_record.Nparts[PPP[i].type]++; break;
+	default: fof_record.Nparts[0]++; break;
+	}
+    }
+
+  if( fof_record.fof_id != last )
+    {
+      DPRINT("thread %d updating halo %llu\n",
+	     me, fof_record.fof_id );
+     #pragma omp atomic update
+      table[fof_record.fof_id].TotN += fof_record.TotN;
+      for( int j = 0; j < NTYPES; j++) {
+       #pragma omp atomic update
+	table[fof_record.fof_id].Nparts[j] += fof_record.Nparts[j];
+	fof_record.Nparts[j] = 0; }
+    }
+
+  return 0;
+}
+
+
+
+
+// --------------------------------------------------------------------------------
+
+
+
+
 int compare_idsgen_in_particle_t( const void *A, const void *B )
 {
   PID_t idA = ((particle_t*)A)->pid;

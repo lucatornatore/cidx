@@ -136,7 +136,7 @@ int seek_block ( FILE *file, char name[5] )
 
 
 
-int get_subfind_data(char *working_dir, char *subf_base)
+int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 /*
  * this function gets the subfind data, i.e. the
  * arrays of pairs (galaxy, starid )
@@ -167,7 +167,7 @@ int get_subfind_data(char *working_dir, char *subf_base)
       if( (filein = fopen( fname, "r" )) == NULL )
 	{
 	  // unable to find the specified subfind files
-	  printf("unable to find the subfind file both as %s and as %s.0\n",
+	  printf("[sf data] unable to find the subfind file both as %s and as %s.0\n",
 		 subf_base, subf_base);
 	  return -2;
 	}
@@ -191,7 +191,7 @@ int get_subfind_data(char *working_dir, char *subf_base)
   #define SubH  1
   #define FofP  2
   #define SubHP 3
-  num_t HowMany[4] = {0};
+  memset( HowMany, 0, 4*sizeof(num_t) );
   {
     if ( multifile )
       sprintf( fname, "%s/%s.0", working_dir, subf_base );
@@ -201,7 +201,7 @@ int get_subfind_data(char *working_dir, char *subf_base)
     ret = seek_block( filein, "HEAD");
     if ( ret == 0)
       {
-	printf("unable to find the HEAD block in subfind files\n");
+	printf("[sf data] unable to find the HEAD block in subfind files\n");
 	return -3;
       }
     // skip some bytes in the header and get to the total number
@@ -224,7 +224,7 @@ int get_subfind_data(char *working_dir, char *subf_base)
     if( numfiles != nfiles )
       {
 	fclose(filein);
-	printf("the number of file specified in the header (%d) "
+	printf("[sf data] the number of file specified in the header (%d) "
 	       "is different than the number of files found (%d)\n",
 	       numfiles, nfiles );
 	return -3;
@@ -270,7 +270,7 @@ int get_subfind_data(char *working_dir, char *subf_base)
       else
 	sprintf( fname, "%s/%s", working_dir, subf_base );
       
-      DPRINT(2,-1, "opening file %d: %s\n", go, fname);
+      DPRINT(2,-1, "[sf data] opening file %d: %s\n", go, fname);
       
       files[go].ptr  = fopen( fname, "r" );
       omp_init_lock(&files[go].lock);
@@ -346,8 +346,8 @@ int get_subfind_data(char *working_dir, char *subf_base)
   //
   Np = HowMany[FofP];
   
-  printf("%llu total particles belong to %llu sub-haloes\n", HowMany[SubHP], HowMany[SubH]);
-
+  printf("[sf data] %llu total particles belong to %llu sub-haloes\n", HowMany[SubHP], HowMany[SubH]);
+  
   int failures = 0;
   #pragma omp parallel
   {
@@ -357,7 +357,7 @@ int get_subfind_data(char *working_dir, char *subf_base)
     PPP      = (particle_t*)calloc( myNp, sizeof(particle_t));
     
     PID_t avg_Np  = Np / Nthreads;
-    ll_t  fofn    = 0;
+    ll_t  fofn   = 0;
     ll_t  hn      = 0;
     ul_t  fn      = 0;
     num_t myoff   = avg_Np * me;
@@ -371,8 +371,9 @@ int get_subfind_data(char *working_dir, char *subf_base)
     int  _failures_ = 0;
     num_t particles_off;
     
-    while( (fofn < Nfofs) && (myoff > fofs[fofn+1].offset) )   // note: usinf fofn+1 is safe because
-      fofn++;						   // fofs has Nfofs+1 elements
+    while( (fofn < Nfofs) && (myoff > fofs[fofn+1].offset) )   // note: using fofn+1 is safe because
+      fofn++;						       // fofs has Nfofs+1 elements
+    
     // find the offset inside the fof
     in_fof_off = myoff - fofs[fofn].offset;
     fof_read   = in_fof_off;
@@ -395,8 +396,12 @@ int get_subfind_data(char *working_dir, char *subf_base)
       }
     
     particles_off = myoff;
+
+    dprint(2,me, "[sf data] thread %d is getting %llu particles, "
+	   "starting from halo %lld off %llu , shalo %lld off %llu\n",
+	   me, myNp, fofn, in_fof_off, hn, halo_read);
     
-    while( (read < myNp) && (hn < Nhaloes) && !_failures_ )
+    while( (read < myNp) && (fofn < Nfofs) && (hn < Nhaloes) && !_failures_ )
       {
 
 	particles_off = myoff + read;
@@ -446,7 +451,7 @@ int get_subfind_data(char *working_dir, char *subf_base)
 		}
 
 	      ret = fread( buffer, sizeof(PID_t), howmany_toread, files[fn].ptr);         // actually read the data
-	      if ( ret != (ull_t)howmany_toread ) {                                              // check that everything went fine
+	      if ( ret != (ull_t)howmany_toread ) {                                       // check that everything went fine
 		printf("%d has read %llu instead of %llu from file %d\n",
 		       me, (num_t)read, (num_t)howmany_toread, fn);
 		_failures_++; }
@@ -477,9 +482,12 @@ int get_subfind_data(char *working_dir, char *subf_base)
 		fof_read++;
 		if( fof_read == fofs[fofn].npart )
 		  {
+		    DPRINT("-- chf thread %d has exhausted fof %lld (%llu) with %llu parts\n",
+			   me, fofn, fofs[fofn].npart, read );
 		    fofn++;
-		    if( fofn < Nfofs )
-		      in_fof_off = 0;
+		    //if( fofn < Nfofs )
+		    in_fof_off = 0;
+		    fof_read = 0;
 		  }
 
 		if ( hn < 0 )
@@ -528,10 +536,31 @@ int get_subfind_data(char *working_dir, char *subf_base)
 
       }
 
+   #if defined(DEBUG)
+    fof_table_t *fof_table = calloc( Nfofs, sizeof(fof_table_t));
+    make_fof_table( fof_table, 0);
+    {
+      char fname[200];
+      sprintf( fname, "check_fof_table.%d", me);
+      FILE *file = fopen( fname, "w" );
+      
+      for( num_t i = PPP[0].fofid; i <= PPP[myNp-1].fofid; i++ ) {
+	fprintf(file, "%10llu\t%llu", i, fof_table[i].TotN);
+	for( int j = 0; j < NTYPES; j++ )
+	  fprintf(file, "\t%10llu", fof_table[i].Nparts[j] );
+	fprintf(file, "\n"); }	    
+      
+      fclose(file);	  
+    }
+    #endif
+    
+    
     fprintf( details, "thread %d got %llu particles from subfind data\n", me, myNp);
   }
 
   fprintf( details, "\n");
+
+  
   
   for( unsigned int i = 0; i < nfiles; i++ )
     fclose( files[i].ptr);
