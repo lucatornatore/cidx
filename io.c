@@ -318,9 +318,10 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 	  for( unsigned int i = 0; i < nsubh; i++ )
 	    {
 	      haloes[ Nhaloes + i ].parent = buffer[i];
-	      hidx = ( buffer[i] == prev_parent ? hidx+1 : 0);
-	      prev_parent = buffer[i];
+	      hidx *= ( buffer[i] == prev_parent);
 	      haloes[ Nhaloes + i ].index  = hidx;
+	      hidx++;
+	      prev_parent = buffer[i];
 	    }
 
 	  free(buffer);
