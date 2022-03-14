@@ -247,6 +247,9 @@ int main( int argc, char **argv)
 	  PRINT_TIMINGS( "sorting thread's ids", "s", telapsed );
 	}
        #if defined(DEBUG)
+	dprint(1, -1, "\tIDs limit for thread %d is: %llu\n",
+	       me, IDranges[me] );
+       #pragma omp barrier
        #pragma omp single
 	dprint(0, -1, "\tchecking snap particles ids order..\n");
 	
@@ -262,13 +265,13 @@ int main( int argc, char **argv)
        #pragma omp single
 	printf("\tassigning type to subfind particles..\n");
 
-	num_t OoR, Fls;
-	num_t fails = assign_type_to_subfind_particles( &OoR, &Fls );
+	num_t OoR, rng_Fls, gen_Flrs;
+	num_t fails = assign_type_to_subfind_particles( &OoR, &rng_Fls, &gen_Flrs );
 
 	if( fails )
-	  printf("[err] thread %d has got %llu out-of-range "
-		 "and %llu failures over %llu particles\n",
-		 me, OoR, Fls, myNp);
+	  printf("\t[err] thread %d has got %llu out-of-range "
+		 "%llu range failures and %llu generation failures over %llu particles\n",
+		 me, OoR, rng_Fls, gen_Flrs, myNp);
 
        #pragma omp barrier
 
@@ -339,10 +342,10 @@ int main( int argc, char **argv)
 		       me, check);
 
 	     #if defined(MASKED_ID_DBG)
-	      for( int i = 0; i < myNp; i++ )
+	      for( num_t i = 0; i < myNp; i++ )
 		if( P[0][i].pid == MASKED_ID_DBG )
 		  dprint(0, me, "[ID DBG][P][th %d] found particle with masked id %llu, "
-			 "type %d, gen %d at pos %d\n", me,
+			 "type %d, gen %d at pos %llu\n", me,
 			 (ull_t)P[0][i].pid, P[0][i].type, P[0][i].gen, i);	      
 	     #endif
 	      
@@ -382,10 +385,10 @@ int main( int argc, char **argv)
 		 me, ret);
 
        #if defined(MASKED_ID_DBG)
-	for( int i = 0; i < myNp; i++ )
+	for( num_t i = 0; i < myNp; i++ )
 	  if( P[0][i].pid == MASKED_ID_DBG )
 	    dprint(0, me, "[ID DBG][S][th %d] found particle with masked id %llu, "
-		   "type %d, gen %d at pos %d\n", me,
+		   "type %d, gen %d at pos %llu\n", me,
 		   (ull_t)P[0][i].pid, P[0][i].type, P[0][i].gen, i);	
        #endif
 	

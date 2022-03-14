@@ -66,13 +66,17 @@ int mask_ids_and_find_ranges( const PID_t id_mask, const int bitshift, num_t *ra
 	  case 2: ID = IDs[i].pid; break;
 	  default: ID = 0;
 	  }
+	if( ID == 0 )
+	  printf("th %d warns:: particle %llu has ID 0\n",
+		 me, i );
 	//id_size_alert += ( ID > id_mask );
 	masked_id = ID & id_mask;
 	int  gen       = ID >> bs;
        #if defined(DEBUG) && defined(MASKED_ID_DBG)
 	if( masked_id == MASKED_ID_DBG )
-	  dprint(0, me, "[ID DBG][M][th %d] found particle with masked id %llu, gen %d\n", me,
-		 (num_t)masked_id, gen);
+	  dprint(0, me, "[ID DBG][M][th %d] found particle with "
+		 "masked id %llu (ID %llu), gen %d\n", me,
+		 (num_t)masked_id, (num_t)ID, gen);
        #endif
 	min_bound      = ( min_bound > masked_id ? masked_id : min_bound );
 	max_bound      = ( max_bound < masked_id ? masked_id : max_bound );
@@ -554,10 +558,10 @@ int distribute_particles( void )
     max_p = (max_p < myNp ? myNp : max_p);
 
    #if defined(DEBUG) && defined(MASKED_ID_DBG)
-    for( int i = 0; i < myNp; i++ )
+    for( num_t i = 0; i < myNp; i++ )
       if( P[0][i].pid == MASKED_ID_DBG )
 	dprint(0, me, "[ID DBG][R][th %d] found particle "
-	       "with masked id %llu, gen %d at pos %d\n", me,
+	       "with masked id %llu, gen %d at pos %llu\n", me,
 	       (ull_t)P[0][i].pid, P[0][i].gen, i);
    #endif
 
@@ -780,7 +784,7 @@ int distribute_ids( void )
 int make_fof_table( fof_table_t *table, int mode )
 {
 
-  long long int last = -1;
+  num_t       last = -1;
   fof_table_t fof_record = {0};
   fof_record.fof_id = PPP[0].fofid;
   
@@ -788,7 +792,7 @@ int make_fof_table( fof_table_t *table, int mode )
     {
       if( PPP[i].fofid != fof_record.fof_id )
 	{
-	  DPRINT("thread %d updating halo %llu\n",
+	  DPRINT(1, me, "thread %d updating halo %llu\n",
 		me, fof_record.fof_id );
 	  last = fof_record.fof_id;
 	 #pragma omp atomic update
@@ -812,7 +816,7 @@ int make_fof_table( fof_table_t *table, int mode )
 
   if( fof_record.fof_id != last )
     {
-      DPRINT("thread %d updating halo %llu\n",
+      DPRINT(1, me, "thread %d updating halo %llu\n",
 	     me, fof_record.fof_id );
      #pragma omp atomic update
       table[fof_record.fof_id].TotN += fof_record.TotN;
@@ -897,7 +901,7 @@ int sort_thread_idtype( void )
 }
 
 
-int assign_type_to_subfind_particles( num_t *o_of_r, num_t *failures)
+int assign_type_to_subfind_particles( num_t *o_of_r, num_t *range_failures, num_t *gen_failures)
 {
   /* FILE *FILE; */
   /* char name[100]; */
@@ -905,7 +909,8 @@ int assign_type_to_subfind_particles( num_t *o_of_r, num_t *failures)
   /* FILE = fopen( name, "w"); */
   
   num_t out_of_range = 0;
-  num_t fails = 0;
+  num_t range_fails  = 0;
+  num_t gen_fails    = 0;
   
   for( num_t j = 0; j < myNp; j++ )
     {
@@ -943,15 +948,22 @@ int assign_type_to_subfind_particles( num_t *o_of_r, num_t *failures)
 	    stop += all_NID[target_thread];
 	    while( res < stop && (res+1)-> pid == pid && res-> gen != gen ) ++res;
 	    if( res->gen != gen )
-	      fails++;
+	      gen_fails++;
 	    else PPP[j].type = res->type; }
 	  else {
-	    fails++; }
+	    range_fails++;
+	   #if defined(DEBUG)
+	    fprintf(stderr, "th %d: id %llu failed in searching on thread %d (%llu %llu)\n",
+		    me, PPP[j].pid, target_thread,
+		    all_IDs[target_thread][0].pid,
+		    IDranges[target_thread]);
+	   #endif
+	  }
 
 	 #if defined(DEBUG) && defined(MASKED_ID_DBG)
 	  if( PPP[j].pid == MASKED_ID_DBG )
 	    dprint(0, me, "[ID DBG][A][th %d] found particle with masked id %llu, "
-		   "type %d, gen %d at pos %d : has type %d\n", me,
+		   "type %d, gen %d at pos %llu : has type %d\n", me,
 		   PPP[j].pid, PPP[j].type, PPP[j].gen, j, res->type);	      
 	 #endif
 	  
@@ -960,8 +972,9 @@ int assign_type_to_subfind_particles( num_t *o_of_r, num_t *failures)
 	out_of_range++;
     }
 
-  *o_of_r = out_of_range;
-  *failures = fails;
+  *o_of_r         = out_of_range;
+  *range_failures = range_fails;
+  *gen_failures   = gen_fails;
   //fclose(FILE);
-  return (out_of_range > 0) + (fails > 0);
+  return (out_of_range > 0) + ((range_fails > 0)<<1) + ((gen_fails > 0)<<2);
 }

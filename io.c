@@ -125,10 +125,22 @@ int seek_block ( FILE *file, char name[5] )
     }
 
   if ( !feof(file) && (ret == 1))
-    {
-      int tag;
-      ret = fread( &tag, sizeof(int), 1, file);
-      return tag;
+    {       
+      int   tag1, tag2;
+      ret = fread( &tag1, sizeof(int), 1, file);
+      off_t pos = ftello( file );
+      ret = fseeko( file, tag1, SEEK_CUR );
+      ret = fread( &tag2, sizeof(int), 1, file);
+      ret = fseeko ( file, pos, SEEK_SET);
+      if( (tag1 != tag2) ) {
+	printf("[SEEKBLOCK] error in tags of block %s: %d vs %d\n",
+	       name, tag1, tag2 );
+	return 0; }
+	
+      if( tag1 == 0 )
+	printf("[SEEKBLOCK] error 0-valued tags for block %s\n", name);
+	
+      return tag1;
     }
   else  
     return 0;
@@ -141,8 +153,6 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
  * this function gets the subfind data, i.e. the
  * arrays of pairs (galaxy, starid )
  *
- * temporarly, for development purposes, we
- * randomly generate them
  */
 {
 
@@ -352,7 +362,8 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
   int failures = 0;
   #pragma omp parallel
   {
-
+    #warning "who knows"
+    
     int rem  = (int)(Np % (num_t)Nthreads);
     myNp     = Np / Nthreads + (me < rem);
     PPP      = (particle_t*)calloc( myNp, sizeof(particle_t));
@@ -372,20 +383,20 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
     int  _failures_ = 0;
     num_t particles_off;
     
-    while( (fofn < Nfofs) && (myoff > fofs[fofn+1].offset) )   // note: using fofn+1 is safe because
-      fofn++;						       // fofs has Nfofs+1 elements
+    while( (fofn < (ll_t)Nfofs) && (myoff > fofs[fofn+1].offset) )   // note: using fofn+1 is safe because
+      fofn++;						             // fofs has Nfofs+1 elements
     
     // find the offset inside the fof
     in_fof_off = myoff - fofs[fofn].offset;
     fof_read   = in_fof_off;
     //read       = in_fof_off;
     
-    while( (hn < Nhaloes) && (myoff > haloes[hn+1].offset) )   // note: same here as for hn+1
+    while( (hn < (ll_t)Nhaloes) && (myoff > haloes[hn+1].offset) )   // note: same here as for hn+1
       hn++;
     hn += ( myoff > haloes[hn].offset + haloes[hn].npart );    // in case myoff falls at the end of a fof
                                                                // where its haloes are finished and those
                                                                // of the next fof did not start yet.
-    if( hn < Nhaloes )
+    if( hn < (ll_t)Nhaloes )
       {
 	ul_t in_halo_off = 0;
 	// find the offset inside the halo
@@ -402,7 +413,7 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 	   "starting from halo %lld off %llu , shalo %lld off %llu\n",
 	   me, myNp, fofn, in_fof_off, hn, halo_read);
     
-    while( (read < myNp) && (fofn < Nfofs) && (hn < Nhaloes) && !_failures_ )
+    while( (read < myNp) && (fofn < (ll_t)Nfofs) && (hn < (ll_t)Nhaloes) && !_failures_ )
       {
 
 	particles_off = myoff + read;
@@ -471,6 +482,9 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 	    for( num_t i = 0; (i < howmany_toread) && (read < myNp); i++, read++ )
 	      {
 
+		if( buffer[i] == 0 )
+		  printf("file %d part %llu has 0 pid\n", fn, i );
+		
 		// fill particle's info
 		//
 		PPP[read].pid   = buffer[i];
@@ -483,7 +497,7 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 		fof_read++;
 		if( fof_read == fofs[fofn].npart )
 		  {
-		    DPRINT("-- chf thread %d has exhausted fof %lld (%llu) with %llu parts\n",
+		    DPRINT(1, -1, "-- chf thread %d has exhausted fof %lld (%llu) with %llu parts\n",
 			   me, fofn, fofs[fofn].npart, read );
 		    fofn++;
 		    //if( fofn < Nfofs )
@@ -553,7 +567,7 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
       
       fclose(file);	  
     }
-    #endif
+   #endif
     
     
     fprintf( details, "thread %d got %llu particles from subfind data\n", me, myNp);
@@ -578,11 +592,8 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 
 int get_id_data(char *working_dir, char *name)
 /*
- * this function gets the subfind data, i.e. the
- * arrays of pairs (galaxy, starid )
+ * this function gets the ids from the snapshot
  *
- * temporarly, for development purposes, we
- * randomly generate them
  */
 {
 
@@ -1127,10 +1138,10 @@ num_t get_catalog_data_from_file(char *name, int nfiles, int type, num_t AllN )
     
    #if defined(MASKED_ID_DBG)
     // track a given masked id for debugging purposes
-    for( int i = 0; i < myNp; i++ )
+    for( num_t i = 0; i < myNp; i++ )
       if( P[type][i].pid == MASKED_ID_DBG )
 	dprint(0, me, "[ID DBG][S][th %d] found particle with masked id %llu, "
-	       "type %d, gen %d at pos %d\n", me,
+	       "type %d, gen %d at pos %llu\n", me,
 	       (ull_t)P[type][i].pid, P[type][i].type, P[type][i].gen, i);	
    #endif
 

@@ -65,7 +65,7 @@
 typedef unsigned int       ul_t;
 typedef unsigned long long ull_t;
 typedef long long int      ll_t;
-typedef long long int      num_t;
+typedef unsigned long long int      num_t;
 
 #if defined(LONG_IDS)
 typedef unsigned long long PID_t;
@@ -134,7 +134,7 @@ int   distribute_particles        ( void );
 int   distribute_ids              ( void );
 int   sort_thread_particles       ( num_t * );
 int   sort_thread_idtype          ( void );
-int   assign_type_to_subfind_particles( num_t *, num_t * );
+int   assign_type_to_subfind_particles( num_t *, num_t *, num_t *);
 PID_t get_stellargenerations_mask ( int, int * );
 int   get_stellargenerations      ( PID_t, PID_t, int );
 int   get_subfind_data            ( char *, char *, num_t [4]);
@@ -166,7 +166,7 @@ extern void* mybsearch_in_P       (const particle_t *, const num_t, const PID_t 
 #if defined(DEBUG)
 num_t check_partition             (const num_t, const num_t, const num_t, const PID_t, const int);
 num_t check_sorting               (const num_t, const num_t, const int);
-//#define MASKED_ID_DBG             3093217
+#define MASKED_ID_DBG             0
 #endif
 
 
