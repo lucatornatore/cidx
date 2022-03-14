@@ -15,10 +15,10 @@ FPIC       = "-fPIC"
 EXEC_NAME  =cidx
 
 LONG_IDS   =on
-PRODUCTION =off
-DEBUG      =on
+PRODUCTION =on
+DEBUG      =off
 
-DEBUG_INFO =on
+DEBUG_INFO =off
 SANITIZE   =off
 PAPI       =off
 
