@@ -88,6 +88,11 @@ int main( int argc, char **argv)
   if( (action & SEARCH_PARTICLES) && (Nlists == 0) ) {
     printf("you did not specify any list of particles to look for in catalogs\n");
     exit(2); }
+
+ #if defined(DEBUG)
+  action |= BUILD_FOF_TABLE;
+ #endif
+
   
   if( (strcmp( working_dir_snap_base, ".") == 0) ||
       (strcmp( working_dir_snap_base, "./") == 0) )

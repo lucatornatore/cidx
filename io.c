@@ -551,23 +551,23 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 
       }
 
-   #if defined(DEBUG)
-    fof_table_t *fof_table = calloc( Nfofs, sizeof(fof_table_t));
-    make_fof_table( fof_table, 0);
-    {
-      char fname[200];
-      sprintf( fname, "check_fof_table.%d", me);
-      FILE *file = fopen( fname, "w" );
+   /* #if defined(DEBUG) */
+   /*  fof_table_t *fof_table = calloc( Nfofs, sizeof(fof_table_t)); */
+   /*  make_fof_table( fof_table, 0); */
+   /*  { */
+   /*    char fname[200]; */
+   /*    sprintf( fname, "check_fof_table.%d", me); */
+   /*    FILE *file = fopen( fname, "w" ); */
       
-      for( num_t i = PPP[0].fofid; i <= PPP[myNp-1].fofid; i++ ) {
-	fprintf(file, "%10llu\t%llu", i, fof_table[i].TotN);
-	for( int j = 0; j < NTYPES; j++ )
-	  fprintf(file, "\t%10llu", fof_table[i].Nparts[j] );
-	fprintf(file, "\n"); }	    
+   /*    for( num_t i = PPP[0].fofid; i <= PPP[myNp-1].fofid; i++ ) { */
+   /* 	fprintf(file, "%10llu\t%llu", i, fof_table[i].TotN); */
+   /* 	for( int j = 0; j < NTYPES; j++ ) */
+   /* 	  fprintf(file, "\t%10llu", fof_table[i].Nparts[j] ); */
+   /* 	fprintf(file, "\n"); }	     */
       
-      fclose(file);	  
-    }
-   #endif
+   /*    fclose(file);	   */
+   /*  } */
+   /* #endif */
     
     
     fprintf( details, "thread %d got %llu particles from subfind data\n", me, myNp);

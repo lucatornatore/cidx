@@ -472,6 +472,7 @@ int distribute_particles( void )
  #pragma omp parallel reduction(min:min_p) reduction(max:max_p)
   {
     num_t positions[Nthreads];
+
     
     // partition the particles in each thread
     // so that at the end they are divided in bunches
@@ -556,13 +557,14 @@ int distribute_particles( void )
 
     min_p = (min_p > myNp ? myNp : min_p);
     max_p = (max_p < myNp ? myNp : max_p);
-
+   
    #if defined(DEBUG) && defined(MASKED_ID_DBG)
+   #pragma omp barrier
     for( num_t i = 0; i < myNp; i++ )
       if( P[0][i].pid == MASKED_ID_DBG )
 	dprint(0, me, "[ID DBG][R][th %d] found particle "
-	       "with masked id %llu, gen %d at pos %llu\n", me,
-	       (ull_t)P[0][i].pid, P[0][i].gen, i);
+	       "with masked id %llu, type %d gen %d at pos %llu\n", me,
+	       (ull_t)P[0][i].pid, P[0][i].type, P[0][i].gen, i);
    #endif
 
     
@@ -792,17 +794,19 @@ int make_fof_table( fof_table_t *table, int mode )
     {
       if( PPP[i].fofid != fof_record.fof_id )
 	{
-	  DPRINT(1, me, "thread %d updating halo %llu\n",
+	  DPRINT(1, -1, "thread %d updating halo %llu\n",
 		me, fof_record.fof_id );
 	  last = fof_record.fof_id;
+	  
 	 #pragma omp atomic update
 	  table[fof_record.fof_id].TotN += fof_record.TotN;
-	  fof_record.TotN = 0;
+	  	  
 	  for( int j = 0; j < NTYPES; j++) {
 	   #pragma omp atomic update
 	    table[fof_record.fof_id].Nparts[j] += fof_record.Nparts[j];
 	    fof_record.Nparts[j] = 0; }
 
+	  fof_record.TotN = 0;
 	  fof_record.fof_id = PPP[i].fofid;
 	}
 

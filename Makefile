@@ -16,9 +16,9 @@ EXEC_NAME  =cidx
 
 LONG_IDS   =on
 PRODUCTION =on
-DEBUG      =off
+DEBUG      =on
 
-DEBUG_INFO =off
+DEBUG_INFO =on
 SANITIZE   =off
 PAPI       =off
 

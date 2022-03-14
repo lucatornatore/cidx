@@ -62,7 +62,7 @@ int   action = UNDEFINED;
 int   help_given = 0;
 
 // note: in the following functions, "mode" should be passed
-// as argc from the main, so that is is > 0 and also conveys
+// as argc from the main, so that it is > 0 and also conveys
 // infos on the number of arguments which is needed for
 // options that scroll through next arguments
 //
