@@ -306,7 +306,7 @@ int main( int argc, char **argv)
 	    
 	   #pragma omp barrier
 	    
-	    make_fof_table( fof_table, 1 );
+	    make_fof_table( fof_table, HowMany[0], 1 );
 	    
 	   #pragma omp barrier
 	    
@@ -315,13 +315,21 @@ int main( int argc, char **argv)
 	      FILE *file = fopen( catalog_table_name, "w" );
 	      
 	      for( num_t i = 0; i < HowMany[0]; i++ ) {
-		fprintf(file, "%10llu\t%llu", i, fof_table[i].TotN);
+		fprintf(file, "%10llu\t%lld\t%llu", i, (long long int)fof_table[i].nsubhaloes, fof_table[i].TotN );
+
+		for( int s = 0; s < fof_table[i].nsubhaloes; s++ )		  
+		  if (fof_table[i].subh_occupancy[s] == 0)
+		    printf(">>>> fof %llu has got sub-halo %u with 0 occupancy\n", i,s );
+		free( fof_table[i].subh_occupancy );
+		
 		for( int j = 0; j < NTYPES; j++ )
 		  fprintf(file, "\t%10llu", fof_table[i].Nparts[j] );
 		fprintf(file, "\n"); }	    
 	      
-	      fclose(file);	  
+	      fclose(file);
+	      free( fof_table );
 	    }
+
 	  }
 	
 	// ------------------------------------  
@@ -480,6 +488,7 @@ int main( int argc, char **argv)
   
   
       if( !( action & SEARCH_PARTICLES) ){
+	free( Nparts_all[0] );
 	for( int t = 0; t < NTYPES; t++ )
 	  free( P_all[t] );
        #pragma omp parallel
@@ -602,8 +611,8 @@ int main( int argc, char **argv)
 	      {
 
 		// find masked ids and generation
-		PID_t        masked_id;
-		unsigned int generation;
+		PID_t masked_id;
+		int   generation;
 
 		masked_id  = List[j].pid & id_mask;
 		generation = List[j].pid >> bs;

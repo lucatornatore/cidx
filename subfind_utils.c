@@ -237,7 +237,7 @@ inline num_t partition_IDs_by_pid( const num_t start, const num_t stop, const PI
 }
 
 
-inline num_t partition_P_by_type( const num_t start, const num_t stop, const unsigned int V)
+inline num_t partition_P_by_type( const num_t start, const num_t stop, const int V)
 /*
  * This routine does the partitioning of the particles of each thread by a given type.
  * At the end, the particles in the PPP (i.e. P[0]) array are divided in 2 bunches: the first
@@ -253,7 +253,7 @@ inline num_t partition_P_by_type( const num_t start, const num_t stop, const uns
     return start + (start < myNp ? PPP[start].type < V : 0);
   
   num_t j = start;
-  register unsigned int myV = V;
+  register int myV = V;
 
   while( (j < stop) && (PPP[j].type <= myV) )
     j++;
@@ -261,8 +261,8 @@ inline num_t partition_P_by_type( const num_t start, const num_t stop, const uns
   if ( j == stop )
     return stop;
 
-  num_t        stop_1 = stop - 1;
-  unsigned int A;
+  num_t stop_1 = stop - 1;
+  int   A;
   register particle_t *ptr;
 
   A   = PPP[j].type;
@@ -369,30 +369,27 @@ num_t check_partition(const num_t start, const num_t stop, const num_t pivot, co
 	for(ii = start; ii < pivot; ii++)     // check the first part
 	  tmp += (PPP[ii].pid > V);
 
-	if( ii < stop - 1)                // check the second part
+	if( ii < stop - 1)                    // check the second part
 	  for(; ii < stop; ii++)
 	    tmp += (PPP[ii].pid < V);
       } break;
     case 1:
       {
-	unsigned int iV = (int)V;
-	for(ii = start; ii < pivot; ii++){     // check the first part
-	  num_t f = (PPP[ii].type > iV);
-	  if(f)
-	    tmp ++; }
+	int iV = (int)V;
+	for(ii = start; ii < pivot; ii++)     // check the first part
+	  tmp += (PPP[ii].type > iV);
 	
-	if( ii < stop - 1)                // check the second part
-	  for(; ii < stop; ii++) {
-	    num_t f = (PPP[ii].type < iV);
-	    if(f)
-	      tmp++; }
+	if( ii < stop - 1)                    // check the second part
+	  for(; ii < stop; ii++) 
+	    tmp +=(PPP[ii].type < iV);
+
       } break;      
     case 2:
       {
 	for(ii = start; ii < pivot; ii++)     // check the first part
 	  tmp += (IDs[ii].pid > V);
 	
-	if( ii < stop - 1)                // check the second part
+	if( ii < stop - 1)                    // check the second part
 	  for(; ii < stop; ii++)
 	    tmp += (IDs[ii].pid < V);
       } break;
@@ -465,6 +462,7 @@ int distribute_particles( void )
   if( Nthreads == 1 )
     {
       P_all[0][0] = P[0];
+      free(Pranges);
       return 0;
     }
 
@@ -783,20 +781,61 @@ int distribute_ids( void )
 
 
 
-int make_fof_table( fof_table_t *table, int mode )
+int make_fof_table( fof_table_t *table, int nfof, int mode )
 {
 
-  num_t       last = -1;
+  /* as first, each threads get through its particles and
+   * find the max id of subhaloes per fof
+   */
+
+  // find the max gid per each fof my particles belong to
+  fgid_t *my_gid_maxid = (fgid_t*)calloc(nfof, sizeof(num_t));
+  for( num_t i = 0; i < myNp; i++ ) {
+    fgid_t id = PPP[i].gid+1;
+    my_gid_maxid[PPP[i].fofid] = ( my_gid_maxid[PPP[i].fofid] < id ?
+				   id : my_gid_maxid[PPP[i].fofid] );
+  }
+
+  // now reduce the maximum among all threads
+  for ( int f = 0; f < nfof; f++ )
+    {
+      switch( my_gid_maxid[f] ) {
+      case -1: break;
+      default: { fgid_t nsubh;
+	 #pragma omp atomic read
+	  nsubh = table[f].nsubhaloes;
+
+	  if( nsubh < my_gid_maxid[f] ) 
+	   #pragma omp critical (update_nsubhaloes)
+	    table[f].nsubhaloes = (table[f].nsubhaloes < my_gid_maxid[f] ?
+				   my_gid_maxid[f] : table[f].nsubhaloes ); }
+	break;
+      }
+    }
+
+
+  free( my_gid_maxid );
+  
+ #pragma omp barrier
+ #pragma omp single
+  {
+    for ( int f = 0; f < nfof; f++ )
+      table[f].subh_occupancy = (char*)calloc( table[f].nsubhaloes, 1 );
+  }
+
+  int         last       = -1;
+  int         last_gid   = -1;
   fof_table_t fof_record = {0};
   fof_record.fof_id = PPP[0].fofid;
-  
+
   for( num_t i = 0; i < myNp; i++ )
     {
       if( PPP[i].fofid != fof_record.fof_id )
 	{
-	  DPRINT(1, -1, "thread %d updating halo %llu\n",
+	  DPRINT(1, -1, "thread %d updating halo %d\n",
 		me, fof_record.fof_id );
-	  last = fof_record.fof_id;
+	  last     = fof_record.fof_id;
+	  last_gid = -1; 
 	  
 	 #pragma omp atomic update
 	  table[fof_record.fof_id].TotN += fof_record.TotN;
@@ -816,14 +855,22 @@ int make_fof_table( fof_table_t *table, int mode )
 	case 1: fof_record.Nparts[PPP[i].type]++; break;
 	default: fof_record.Nparts[0]++; break;
 	}
+      
+      if( (PPP[i].gid >= 0) && (last_gid != PPP[i].gid ))
+	{
+	  last_gid = PPP[i].gid;
+	 #pragma omp atomic write
+	  table[fof_record.fof_id].subh_occupancy[PPP[i].gid] = 1;
+	}
     }
 
   if( fof_record.fof_id != last )
     {
-      DPRINT(1, me, "thread %d updating halo %llu\n",
+      DPRINT(1, me, "thread %d updating halo %d\n",
 	     me, fof_record.fof_id );
      #pragma omp atomic update
       table[fof_record.fof_id].TotN += fof_record.TotN;
+      
       for( int j = 0; j < NTYPES; j++) {
        #pragma omp atomic update
 	table[fof_record.fof_id].Nparts[j] += fof_record.Nparts[j];
@@ -891,6 +938,7 @@ int sort_thread_particles( num_t *positions )
   
   return 0;
 }
+
 
 int sort_thread_idtype( void )
 {
@@ -982,3 +1030,6 @@ int assign_type_to_subfind_particles( num_t *o_of_r, num_t *range_failures, num_
   //fclose(FILE);
   return (out_of_range > 0) + ((range_fails > 0)<<1) + ((gen_fails > 0)<<2);
 }
+
+
+

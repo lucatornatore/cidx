@@ -65,7 +65,8 @@
 typedef unsigned int       ul_t;
 typedef unsigned long long ull_t;
 typedef long long int      ll_t;
-typedef unsigned long long int      num_t;
+typedef unsigned long long int num_t;
+typedef int                fgid_t;
 
 #if defined(LONG_IDS)
 typedef unsigned long long PID_t;
@@ -76,7 +77,7 @@ typedef unsigned int       PID_t;
 #define NTYPES 6
 #define ALL NTYPES
 
-typedef struct {PID_t pid; unsigned int type, gen, fofid, gid;} particle_t;     // pid   is the gadget's ID of the particle
+typedef struct {PID_t pid; int type, gen; fgid_t fofid, gid;} particle_t;       // pid   is the gadget's ID of the particle
                                                                                 // fofid is the cardinal number of the fof the particle belongs to, sequentially read from the sub_ files 
 								                // gid   is the halo number the particle belong to, sequentially read from the sub_ files
 								                // type  is the gadget's type of the particle
@@ -90,7 +91,7 @@ typedef struct { int id_size, particle_t_size, nfiles, dummy; num_t Nparts, Npar
 
 typedef struct { int id_size, nfiles, type_is_present; num_t Nparts, Nparts_total; } list_header_t;
 
-typedef struct { num_t fof_id; num_t TotN, Nparts[NTYPES]; } fof_table_t;
+typedef struct { int fof_id; num_t TotN, Nparts[NTYPES]; fgid_t nsubhaloes; char *subh_occupancy;} fof_table_t;
 
 
 extern int     n_stars_generations, n_stars_generations_def;
@@ -141,11 +142,11 @@ int   get_subfind_data            ( char *, char *, num_t [4]);
 int   get_id_data                 ( char *, char *);
 int   get_catalog_data            ( char *, int *);
 int   get_list_ids                ( char *, int );
-int   make_fof_table              ( fof_table_t*, int );
+int   make_fof_table              ( fof_table_t*, int, int );
 
 num_t partition_P_by_pid   ( const num_t, const num_t, const PID_t);
 num_t partition_IDs_by_pid ( const num_t, const num_t, const PID_t);
-num_t partition_P_by_type  ( const num_t, const num_t, const unsigned int  );
+num_t partition_P_by_type  ( const num_t, const num_t, const int  );
 
 int k_way_partition        ( const num_t, const num_t, const int, const int,
 			     const num_t *, num_t *restrict, int );

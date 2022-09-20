@@ -260,9 +260,12 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
   record_fof_t  *fofs   = (record_fof_t*)calloc( HowMany[Fof]+1, sizeof(record_fof_t) );
 
   // now we need to read all the haloes to discover how many particles in total live
-  // therein, because that useful number is not present in the header
+  // therein, because that useful number is not present in the files' header
+
+  // >>> NOTE: for the sake of simplicity, we load up all the fofs and haloes even
+  //           if there is a fof/halo masking
   
-  PID_t Nhaloes            = 0;
+  PID_t Nhaloes            = 0;  
   PID_t Nfofs              = 0;
   unsigned int hidx        = 0;  
   unsigned int prev_parent = 0;
@@ -362,8 +365,7 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
   int failures = 0;
   #pragma omp parallel
   {
-    #warning "who knows"
-    
+
     int rem  = (int)(Np % (num_t)Nthreads);
     myNp     = Np / Nthreads + (me < rem);
     PPP      = (particle_t*)calloc( myNp, sizeof(particle_t));
@@ -597,11 +599,11 @@ int get_id_data(char *working_dir, char *name)
  */
 {
 
-  FILE *filein;
-  size_t ret = 0;
-  unsigned int   multifile = 0, nfiles = 1;
-  char  fname[ strlen(subf_base)+strlen(working_dir)+5 ];
-  num_t AllN = 0;
+  FILE        *filein;
+  size_t       ret = 0;
+  unsigned int multifile = 0, nfiles = 1;
+  char         fname[ strlen(subf_base)+strlen(working_dir)+5 ];
+  num_t        AllN = 0;
 
   // as first, let's find out how many files there are
   // and how many particles do they have in substructures
@@ -716,6 +718,13 @@ int get_id_data(char *working_dir, char *name)
   
  #pragma omp parallel
   {
+    // in this parallel region each thread determines which section
+    // of ID data it should load from files
+    //
+
+
+    // calculate the limits for this thread
+    //
     int rem       = (int)(AllN % (num_t)Nthreads);
     PID_t avg_NID = AllN / Nthreads;
     num_t myoff   = avg_NID * me;
@@ -724,6 +733,8 @@ int get_id_data(char *working_dir, char *name)
     ul_t  file_start = 0;
     num_t file_start_offset = 0;
 
+    // determine the first file and the offset from which to start
+    //
     while( (file_start < nfiles) && (myoff >= files[file_start].npart_all_inc) )
       file_start++;
     file_start_offset = myoff - (files[file_start].npart_all_inc - files[file_start].npart_all);
@@ -735,6 +746,9 @@ int get_id_data(char *working_dir, char *name)
 	PID_t read = 0;
 
 	while( (read < myNID) && (fn < nfiles) && !_failures_ )
+	  // continue reading until the desired number of
+	  // data have not been loaded
+	  // 
 	  {
 	    num_t npart_local_inc[NTYPES] = {0};
 	    num_t howmany_toread = 0;
