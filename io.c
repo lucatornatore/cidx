@@ -59,6 +59,17 @@ int get_stellargenerations( PID_t id, PID_t mask, int bitshift )
 }
 
 
+PID_t get_unmasked_pid( PID_t masked_pid, int n_gen, int bitshift )
+{
+ #if !defined(LONG_IDS)
+ #define BASE 32
+ #else
+ #define BASE 64
+ #endif
+  
+  PID_t mask = n_gen << (BASE-bitshift);
+  return masked_pid | mask;
+}
 
 
 /*  -------------------------------------------------------------
@@ -97,16 +108,57 @@ typedef struct {
   char names[15][2];
 } snapheader_t;
 
+int check_number_of_files ( char *wdir, char *basename )
+{
+  
+  int   nfiles    = 1;
+  FILE *filein = NULL;
 
-int seek_block ( FILE *file, char name[5] )
+  char *fname = (char*)malloc(strlen(wdir)+strlen(basename)+10);
+  // check whether we are multi-file
+  //
+  sprintf( fname, "%s/%s", wdir, basename );  
+  if( (filein = fopen( fname, "r" )) == NULL )
+    {
+      sprintf( fname, "%s/%s.0", wdir, basename );
+      if( (filein = fopen( fname, "r" )) == NULL )
+	{
+	  // unable to find the specified subfind files
+	  printf("[io] unable to find the file under %s/ "
+		 "both as %s and as %s.0\n",		 
+		 wdir, basename, basename);
+	  free(fname);
+	  return -2;
+	}
+      
+      do
+	{
+	  fclose(filein);
+	  sprintf( fname, "%s/%s.%d", wdir, basename, nfiles );
+	  nfiles += ((filein = fopen( fname, "r" )) != NULL);
+	}
+      while( filein != NULL) ;  
+    }
+  else
+    fclose(filein);
+
+  free(fname);
+  return nfiles;
+}
+
+
+
+		      
+num_t seek_block ( FILE *file, char name[5] )
 /*
  * This function get to the block specified by name
  * in a format-2 file pointed by *file.
  *
  * RETURN VALUE:
- * 0 if the seeking is not successful, otherwiase
- * the 4-bytes long tag at the begin of the data block.
- * The file position is set to the begin if the data 
+ * 0 if the seeking is not successful, otherwise
+ * the 4-bytes long tag at the begin of the data block
+ * (i.e. the block's length in bytes).
+ * The file position is set to the begin of the data 
  * block, right after the length tag.
  *
  */
@@ -140,10 +192,40 @@ int seek_block ( FILE *file, char name[5] )
       if( tag1 == 0 )
 	printf("[SEEKBLOCK] error 0-valued tags for block %s\n", name);
 	
-      return tag1;
+      return (num_t)tag1;
     }
   else  
     return 0;
+}
+
+
+
+int get_particles_num( FILE *file, nparts_t *nparts, int mode )
+{
+  
+  int ret = seek_block( file, "HEAD");
+  
+  if ( ret == 0)
+    {
+      printf("unable to find the HEAD block in snapshot files\n");
+      return -1;
+    }
+
+  snapheader_t header;
+  
+  ret = fread( &header, sizeof(snapheader_t), 1, file);
+  
+  (*nparts)[ALL] = 0;
+  
+  if( mode )         // get the total number of particles
+    for( int i = 0; i < NTYPES; i++ )
+      (*nparts)[ALL] += ((*nparts)[i] = (header.npartTotalHighWord[i]<<31) + header.npartTotal[i]);
+
+  else               // get the snapshot's number of particles    
+    for( int i = 0; i < NTYPES; i++ )
+      (*nparts)[ALL] += ((*nparts)[i] = header.npart[i]);
+
+  return header.num_files;
 }
 
 
@@ -155,10 +237,10 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
  *
  */
 {
-
+  
   FILE * filein;
   size_t ret = 0;
-  unsigned int multifile = 0, nfiles = 1;
+  int    multifile = 0, nfiles = 1;
   char   fname[ strlen(subf_base)+strlen(working_dir)+5 ];
 
   // as first, let's find out how many files there are
@@ -169,28 +251,7 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
   
   // check whether we are multi-file
   //
-  sprintf( fname, "%s/%s", working_dir, subf_base );  
-  if( (filein = fopen( fname, "r" )) == NULL )
-    {
-      multifile = 1;
-      sprintf( fname, "%s/%s.0", working_dir, subf_base );
-      if( (filein = fopen( fname, "r" )) == NULL )
-	{
-	  // unable to find the specified subfind files
-	  printf("[sf data] unable to find the subfind file both as %s and as %s.0\n",
-		 subf_base, subf_base);
-	  return -2;
-	}
-      
-      do
-	{
-	  fclose(filein);
-	  sprintf( fname, "%s/%s.%d", working_dir, subf_base, nfiles );
-	  nfiles += ((filein = fopen( fname, "r" )) != NULL);
-	}
-      while( filein != NULL) ;  
-    }
-
+  multifile = ( (nfiles = check_number_of_files(working_dir, subf_base)) > 1);
 
   // now reconstruct how many particles there are in total in
   // the haloes and in the subhaloes and assign equal bunches
@@ -203,50 +264,32 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
   #define SubHP 3
   memset( HowMany, 0, 4*sizeof(num_t) );
   {
+    nparts_t nparts;
+    
     if ( multifile )
       sprintf( fname, "%s/%s.0", working_dir, subf_base );
     else
       sprintf( fname, "%s/%s", working_dir, subf_base );
     filein = fopen( fname, "r" );
-    ret = seek_block( filein, "HEAD");
-    if ( ret == 0)
-      {
-	printf("[sf data] unable to find the HEAD block in subfind files\n");
-	return -3;
-      }
+
     // skip some bytes in the header and get to the total number
     // of particles (which actually is:
     //   type 0: Fof haloes
     //   type 1: Sub Haloes
     //   type 2: how many particles in Fof haloes
-    fseeko(filein, (off_t)(sizeof(int)*8+sizeof(double)*8), SEEK_CUR);
-
-    // load the low part of particles' number
-    unsigned int low[3];
-    unsigned int high[3];
-    ret = fread( &low[0], sizeof(int), 3, filein );
-
-    // skip to the number of file the snapshot is splitted into
-    fseeko(filein, (off_t)(sizeof(int)*4), SEEK_CUR);
-    unsigned int numfiles;
-    ret = fread( &numfiles, sizeof(int), 1, filein);
-
+    
+    int numfiles = get_particles_num( filein, &nparts, 1 );
+    for( int i = 0; i < 3; i++ )
+      HowMany[i] = nparts[i];
+    
     if( numfiles != nfiles )
       {
 	fclose(filein);
-	printf("[sf data] the number of file specified in the header (%d) "
+	printf("[sf data] the number of files specified in the header (%d) "
 	       "is different than the number of files found (%d)\n",
 	       numfiles, nfiles );
 	return -3;
       }
-
-    // load the high part of particles' number
-    fseeko(filein, (off_t)(sizeof(double)*4+sizeof(int)*2), SEEK_CUR);
-    ret = fread( &high[0], sizeof(int), 3, filein );
-
-    // reconstruct the total number of particles
-    for( int i = 0; i < 3; i++ )
-      HowMany[i] = ((unsigned long long)high[i]<<31) + low[i];
     
     fclose(filein);
   }  
@@ -267,9 +310,10 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
   
   PID_t Nhaloes            = 0;  
   PID_t Nfofs              = 0;
+  int   go                 = 0;
   unsigned int hidx        = 0;  
   unsigned int prev_parent = 0;
-  unsigned int go          = 0;
+  
   do
     {
       #define input files[go].ptr
@@ -349,6 +393,11 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
     }
   while( go < nfiles);
 
+
+  assert( Nfofs == HowMany[Fof] );
+
+  assert( Nhaloes == HowMany[SubH] );
+  
   fofs[ HowMany[Fof] ].npart  = 0;
   fofs[ HowMany[Fof] ].offset = HowMany[FofP];
 
@@ -373,7 +422,7 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
     PID_t avg_Np  = Np / Nthreads;
     ll_t  fofn   = 0;
     ll_t  hn      = 0;
-    ul_t  fn      = 0;
+    int   fn      = 0;
     num_t myoff   = avg_Np * me;
     myoff  += ( me > rem ? rem : me );
 
@@ -484,9 +533,6 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 	    for( num_t i = 0; (i < howmany_toread) && (read < myNp); i++, read++ )
 	      {
 
-		if( buffer[i] == 0 )
-		  printf("file %d part %llu has 0 pid\n", fn, i );
-		
 		// fill particle's info
 		//
 		PPP[read].pid   = buffer[i];
@@ -579,7 +625,7 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 
   
   
-  for( unsigned int i = 0; i < nfiles; i++ )
+  for( int i = 0; i < nfiles; i++ )
     fclose( files[i].ptr);
   free(fofs);
   free(haloes);  
@@ -599,11 +645,11 @@ int get_id_data(char *working_dir, char *name)
  */
 {
 
-  FILE        *filein;
-  size_t       ret = 0;
-  unsigned int multifile = 0, nfiles = 1;
-  char         fname[ strlen(subf_base)+strlen(working_dir)+5 ];
-  num_t        AllN = 0;
+  FILE   *filein;
+  size_t  ret = 0;
+  int     multifile = 0, nfiles = 1;
+  char    fname[ strlen(subf_base)+strlen(working_dir)+5 ];
+  num_t   AllN = 0;
 
   // as first, let's find out how many files there are
   // and how many particles do they have in substructures
@@ -612,53 +658,21 @@ int get_id_data(char *working_dir, char *name)
 
   
   // check whether we are multi-file
-  //  
-  sprintf( fname, "%s/%s", working_dir, name );  
-  if( (filein = fopen( fname, "r" )) == NULL )
-    {
-      multifile = 1;
-      sprintf( fname, "%s/%s.0", working_dir, name );
-      if( (filein = fopen( fname, "r" )) == NULL )
-	{
-	  // unable to find the specified subfind files
-	  printf("unable to find the snapshot file both as %s and as %s.0 under dir %s\n",
-		 name, name, working_dir);
-	  return -2;
-	}
-      
-      do
-	{
-	  fclose(filein);
-	  sprintf( fname, "%s/%s.%d", working_dir, name, nfiles );
-	  nfiles += ((filein = fopen( fname, "r" )) != NULL);
-	}
-      while( filein != NULL) ;  
-    }
-  else
-    fclose(filein);
+  //
+  multifile = ( (nfiles = check_number_of_files(working_dir, name)) > 1);
   
   {
+    nparts_t nparts;
+    
     if ( multifile )
       sprintf( fname, "%s/%s.0", working_dir, name );
     else
       sprintf( fname, "%s/%s", working_dir, name );
     filein = fopen( fname, "r" );
-    ret = seek_block( filein, "HEAD");
-    if ( ret == 0)
-      {
-	printf("unable to find the HEAD block in snapshot files\n");
-	return -3;
-      }
-    fseeko(filein, (off_t)(sizeof(int)*8+sizeof(double)*8), SEEK_CUR);
 
-    unsigned int low[NTYPES];
-    unsigned int high[NTYPES];
-    ret = fread( &low[0], sizeof(int), NTYPES, filein );
-
-    fseeko(filein, (off_t)(sizeof(int)*1), SEEK_CUR);
-    unsigned int numfiles;
-    ret = fread( &numfiles, sizeof(int), 1, filein);
-
+    int numfiles = get_particles_num( filein, &nparts, 1 );
+    AllN = nparts[ALL];
+    
     if( numfiles != nfiles )
       {
 	fclose(filein);
@@ -666,12 +680,6 @@ int get_id_data(char *working_dir, char *name)
 	       numfiles, nfiles );
 	return -3;
       }
-    
-    fseeko(filein, (off_t)(sizeof(double)*4+sizeof(int)*2), SEEK_CUR);
-    ret = fread( &high[0], sizeof(int), NTYPES, filein );
-
-    for( int i = 0; i < NTYPES; i++ )
-      AllN += (high[i]<<31) + low[i];
     
     fclose(filein);
   }  
@@ -686,7 +694,7 @@ int get_id_data(char *working_dir, char *name)
   typedef struct { FILE *ptr; ul_t npart[NTYPES]; num_t npart_all, npart_all_inc; omp_lock_t lock;} record_file_t;  
   record_file_t *files  = (record_file_t*)calloc( nfiles, sizeof(record_file_t) );
 
-  unsigned int go = 0;
+  int go = 0;
   do
     {
      #define input files[go].ptr
@@ -730,7 +738,7 @@ int get_id_data(char *working_dir, char *name)
     num_t myoff   = avg_NID * me;
     myoff  += ( me > rem ? rem : me );
 
-    ul_t  file_start = 0;
+    int   file_start        = 0;
     num_t file_start_offset = 0;
 
     // determine the first file and the offset from which to start
@@ -742,8 +750,8 @@ int get_id_data(char *working_dir, char *name)
     if( file_start < nfiles )
       {
 	unsigned int _failures_ = 0;
-	unsigned int fn = file_start;
-	PID_t read = 0;
+	int          fn         = file_start;
+	PID_t        read       = 0;
 
 	while( (read < myNID) && (fn < nfiles) && !_failures_ )
 	  // continue reading until the desired number of
@@ -787,6 +795,8 @@ int get_id_data(char *working_dir, char *name)
 		    type += (file_start_offset+i >= npart_local_inc[type]);
 		    IDs[read].pid  = buffer[i];
 		    IDs[read].type = type;
+		    IDs[read].file = fn;
+		    IDs[read].pos  = file_start_offset + i;
 		  }
 		
 		omp_unset_lock( &files[fn].lock );
@@ -821,7 +831,7 @@ int get_id_data(char *working_dir, char *name)
 
   fprintf( details, "\n");
   
-  for( unsigned int n = 0; n < nfiles; n++ )
+  for( int n = 0; n < nfiles; n++ )
     fclose(files[n].ptr);
   
   free( files );
@@ -1465,3 +1475,446 @@ num_t get_list_data_from_file(char *name, int nfiles, int file_type, num_t AllN)
   
   return 0;
 }
+
+
+
+/*  -------------------------------------------------------------
+ * 
+ *   routines for generating snapshot-like files of fofs and
+ *   galaxies
+ *
+ *  ------------------------------------------------------------- */
+
+
+
+typedef struct { FILE *ptr; num_t nparts; } file_t;
+typedef struct { int type, fofnum, ngals; } fofheader_t; 
+
+
+int write_block_header( FILE *file, head_t *header )
+// writes a block header into a file
+// note: the label and the size must be set
+//
+{
+  if( file == NULL )
+    return 1;
+  header -> tag1 = 8;
+  header -> tag2 = 8;
+  fwrite( header, sizeof(head_t), 1, file );
+  return 0;
+}
+
+
+
+int write_block( FILE *file, head_t *header, char *block, int size )
+// writes a block into a file
+// note: the label in hte header must be set
+//       size is the data size
+{
+  if( (file == NULL) ||
+      (block == NULL ) ||
+      (header == NULL) ||
+      (size == 0) )
+    return 1;
+  
+  header->len = size + 8;    // add the size of the 2 tags in the block
+  write_block_header( file, header );
+  fwrite( &size, sizeof(int), 1, file );
+  fwrite( block, 1, size, file );
+  fwrite( &size, sizeof(int), 1, file );
+  return 0;
+}
+
+
+
+num_t get_block_from_file( char field[5], FILE *ptr, void *array )
+{
+
+  size_t n   = seek_block(ptr, field );
+  size_t ret = fread( array, 1, n, ptr );
+
+  return (num_t)ret;
+}
+
+
+int write_fofgal_ids( char *wdir, char *snapname, int fofid )
+{
+  UNUSED(wdir);
+  FILE *file;
+  {
+    int   len = strlen(snapname);
+    char *filename = (char*)malloc( len + 100 );
+    char  string[99] = {0};
+    sprintf( string, "_ids_fof_%04d", fofid );
+    sprintf( filename, "%s%s%s", snapname, "_masked", string );
+    file = fopen( filename, "w" );
+  }
+
+  
+ #pragma omp parallel for ordered
+  for( int t = 0; t < Nthreads; t++ )
+    {
+      for( num_t i = 0; i < myNp; i++ ) {
+	switch(PPP[i].fofid == fofid) {
+	case 1: fwrite(&PPP[i].pid, sizeof(PID_t), 1, file ); break; }
+      }
+    }
+
+  fclose(file);
+
+  return 0;
+}
+
+int write_fofgal_snapshots( char *wdir, char *snapname,
+			    mask_galaxies_in_fof_t *masks, int nmasks )
+
+{
+
+  // [ 1 ]
+  // create all the new snap-like files
+  //
+  FILE **FofGalFiles = (FILE**)malloc( nmasks * sizeof(FILE*) );
+  int    failures    = 0;
+  {
+    int     len = strlen(snapname);
+    char   *filename = (char*)malloc( len + 100 );
+    for( int n = 0; n < nmasks; n++ )
+      {
+	char string[99] = {0};
+	sprintf( string, "_fof_%04d", masks[n].fof_num );	
+	if( masks[n].ngal >= 0 )
+	  sprintf( &string[strlen(string)], "_gal_%05d", masks[n].ngal);
+	sprintf( filename, "%s%s%s", snapname, "_masked", string );
+
+	FofGalFiles[n] = fopen( filename, "w" );
+	failures += ( FofGalFiles[n] == NULL );
+      }
+  }
+
+  if( failures > 0 )
+    {
+      printf ( "%d mask files failed to create\n", failures );
+      free( FofGalFiles );
+      return -1;
+    }
+  
+  char  *p_is_masked[Nthreads];
+  num_t *file_positions[Nthreads];
+  num_t *snapout_sizes = calloc(nmasks, sizeof(num_t));
+  
+ #define p_idx(i) ((i)/8)
+ #define p_bytemask(i,s) (char)((s) << (i%8))
+  
+ #pragma omp parallel reduction(+:snapout_sizes[0:nmasks])
+  {
+
+    // [ 2 ]
+    // allocate room for particle structures to be written
+    // in the files at each thread
+    //
+    // allocate an array to check whether a given particle
+    // is masked or not        
+
+    char *_pmasked_ = (char*)calloc( (myNp/8+1), 1);
+    p_is_masked[me] = _pmasked_;
+    
+    nparts_t masked_parts = {0};
+    for ( num_t i = 0; i < myNp; i++ )
+      {
+	int first = 1;
+	for( int m = 0; m < nmasks; m++ )
+	  {
+	    int s = ( (PPP[i].fofid == masks[m].fof_num) &&
+		      ((PPP[i].gid == masks[m].ngal) ||
+		       (masks[m].ngal == -1)) );
+	    snapout_sizes[m]          += s;
+	    
+	    if( s && first ) {
+	      masked_parts[PPP[i].type] += s;
+	      masked_parts[ALL]         += s;	    	  
+	      _pmasked_[p_idx(i)] |= p_bytemask(i,s);
+	      first = 0; }
+	  }
+      }
+
+    outsnap_data = (outsnap_t*)malloc( masked_parts[ALL] * sizeof(outsnap_t) );
+
+    num_t p = 0;
+    for ( num_t i = 0; i < myNp; i++ )
+      {
+	int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
+	switch(is_masked) {
+	case 1: {
+	  PID_t pid = PPP[i].pid;
+	  switch( PPP[i].gen > 0 ) {
+	  case 1: pid = get_unmasked_pid( pid, PPP[i].gen, id_bitshift ); break; }
+	  outsnap_data[p].idx.pid   = pid;
+	  outsnap_data[p].idx.fofid = PPP[i].fofid;
+	  outsnap_data[p].idx.gid   = PPP[i].gid;
+	  outsnap_data[p].type      = PPP[i].type; p++; } break; }
+      }
+    printf("\t[thread %d] %llu particles masked\n", me, (unsigned long long)p);
+
+    // partition particles by the file they belong to
+
+    
+    int nfiles = check_number_of_files(wdir, snapname);
+
+    num_t *fpositions = (num_t*)calloc( nfiles, sizeof(num_t) );
+    memset(fpositions, 0, sizeof(num_t)*nfiles);
+    file_positions[me] = fpositions;
+
+    num_t franges[nfiles];
+    for( int n = 0; n < nfiles; n++ )
+      franges[n] = n;
+    
+    k_way_partition(0, myNp, 0, nfiles-2, franges, fpositions, 3);
+
+   #if defined(DEBUG)
+    {
+      num_t fails = 0;
+      for( num_t i = 1; i < myNp; i++ )
+	fails += (PPP[i].file < PPP[i-1].file);
+
+      if( fails > 0 )
+	printf("\t[thread %d] has %llu errors in by-file partitioning\n",
+	       me, fails );
+    }
+   #endif
+    
+    }
+  
+  // [ 3 ]
+  // allocate buffer for storing blocks from snapshot files
+  //
+  // here we should parse the required blocks
+  // to individuate the largest one
+  // ...
+  // for the moment, we skip this and assume
+  // that the largest is the pos / vel which
+  // contain 3 entries per particle
+  //
+  
+                                                                     // note: in the following,
+						                     // - sizeof_out_data is either 4 or 8 bytes
+						                     // depending on the desired precision
+						                     // - max_data_multiplicity is the largest
+						                     // amount of data per particles per block
+						                     // (i.e. 3 for positions or velocities, 1
+						                     // for most quantities, NMet for metallicities
+						                     // and so on)
+  
+  int max_data_multiplicity = 3;  
+  int max_size_per_particle = max_data_multiplicity*sizeof_out_data; 
+  
+  // [ 4 ]
+  // loops over snapshot files and get particles
+    
+
+  int   nfiles;
+  char *fname = (char*)malloc( strlen(wdir) + strlen(snapname) + 10 );  
+  nfiles = check_number_of_files(wdir, snapname);
+  
+  for ( int f = 0; f < nfiles; f++ )
+    {
+      FILE  *filein;
+      
+      
+      if ( nfiles > 1 )
+	sprintf( fname, "%s/%s.0", wdir, snapname );
+      else
+	sprintf( fname, "%s/%s", wdir, snapname );
+      filein = fopen( fname, "r" );
+
+      nparts_t nparts;
+      get_particles_num( filein, &nparts, 1 );      
+
+      char *block = (char*)malloc(max_size_per_particle * nparts[ALL]);
+
+      snapheader_t snapheader;
+      get_block_from_file( "HEAD", filein, (void*)&snapheader );
+
+      get_block_from_file( "POS ", filein, (void*)block );
+	  
+     #pragma omp parallel
+      {
+	char *_pmasked_ = p_is_masked[me];
+	num_t i = (f == 0 ? 0 : file_positions[me][f-1]);
+
+	float_out halfbox = (float_out)snapheader.BoxSize / 2.0;
+
+	for( num_t p = 0; (i < myNp) && (PPP[i].file==f); i++ )
+	  {
+	    int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
+	    switch( is_masked )
+	      {
+	      case 1: { switch( sizeof_in_data == sizeof(float) ) {
+		  case 0: { for( int j = 0; j < 3 ; j++ )
+			outsnap_data[p].pos[j] = (float_out)*((double*)block + PPP[i].pos*3 + j); } break;
+		  case 1: { for( int j = 0; j < 3 ; j++ )
+			outsnap_data[p].pos[j] = (float_out)*((float*)block + PPP[i].pos*3 + j); } break; }
+
+		  switch( shiftbox ) {
+		  case 1: { for( int j = 0; j < 3 ; j++ ) outsnap_data[p].pos[j] -= halfbox; } break; }
+
+		  p++; } break;
+	      default: break;
+	      }
+
+	    
+	  }
+      }
+
+      get_block_from_file( "VEL ", filein, (void*)block );
+      
+     #pragma omp parallel
+      {
+	char *_pmasked_ = p_is_masked[me];
+	num_t i = (f == 0 ? 0 : file_positions[me][f-1]);
+	
+	for( num_t p = 0; (i < myNp) && (PPP[i].file==f); i++ )
+	  {
+	    int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
+	    switch( is_masked )
+	      {
+	      case 1: { double v2 = 0;
+		  if( sizeof_in_data == sizeof(float) ) {
+		    for( int j = 0; j < 3 ; j++ )
+		      v2 += *((float*)block + PPP[i].pos*3 + j)* *((float*)block + PPP[i].pos*3 + j); }
+		  else { for( int j = 0; j < 3 ; j++ )
+		      v2 += *((double*)block + PPP[i].pos*3 + j)* *((double*)block + PPP[i].pos*3 + j); }
+		  outsnap_data[p].vel2 = v2; p++; }
+	      default: break;
+	      }
+	  }
+      }
+
+
+      get_block_from_file( "MASS", filein, (void*)block );
+      
+     #pragma omp parallel
+      {
+	char *_pmasked_ = p_is_masked[me];
+	double masstable[NTYPES];
+	memcpy( masstable, snapheader.mass, sizeof(double)*NTYPES );
+
+	num_t offset[NTYPES] = {0};
+	for( int t = 1; t < NTYPES; t++ )
+	  {
+	    for ( int j = 0; j < t; j++ )
+	      offset[t] += nparts[j]*(masstable[j]>0);
+	  }
+	
+	num_t i = (f == 0 ? 0 : file_positions[me][f-1]);
+	for( num_t p = 0; (i < myNp) && (PPP[i].file==f); i++ )
+	  {
+	    int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
+	    double mass = masstable[PPP[i].type];
+	    switch( is_masked )
+	      {
+	      case 1: {
+		switch( mass == 0 )
+		  {
+		  case 1: {		    
+		    num_t n = PPP[i].pos - offset[PPP[i].type];
+		    if( sizeof_in_data == sizeof(float) )
+		      mass = *((float*)block + n);
+		    else 
+		      mass = *((double*)block + n);
+		  } break;
+		  default: break;
+		  }
+		outsnap_data[p].vel2 *= mass; p++;
+	      }
+	      default: break;
+	      }
+	  }
+      }
+
+      get_block_from_file( "POT ", filein, (void*)block );
+      
+     #pragma omp parallel
+      {
+	char *_pmasked_ = p_is_masked[me];
+	num_t i = (f == 0 ? 0 : file_positions[me][f-1]);
+	for( num_t p = 0; (i < myNp) && (PPP[i].file==f); i++ )
+	  {
+	    int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
+	    switch( is_masked )
+	      {
+	      case 1: { double pot = 0;
+		  if( sizeof_in_data == sizeof(float) )
+		    pot = (double)*((float*)block + PPP[i].pos);
+		  else 
+		    pot = *((double*)block + PPP[i].pos);
+		  outsnap_data[p].pot = pot; p++; }
+	      default: break;
+	      }
+	  }
+      }
+
+      free(block);
+      fclose(filein);
+
+
+    }
+
+  for( int f = 0; f < nmasks; f++ )
+    {
+      int size;
+      printf("\twriting %llu particles in mask file %d\n",
+	     (unsigned long long)snapout_sizes[f], f );
+
+      
+      // write how many particles will be in the file
+      fwrite( &snapout_sizes[f], sizeof(num_t), 1, FofGalFiles[f] );      
+
+      // write the size of IDs
+      size = sizeof(PID_t);
+      fwrite( &size, sizeof(int), 1, FofGalFiles[f] );
+
+      // write the size of floats
+      size = sizeof_out_data;
+      fwrite( &size, sizeof(int), 1, FofGalFiles[f] );
+    }
+    
+  #pragma omp parallel
+  {
+    char *_pmasked_ = p_is_masked[me];
+    
+   #pragma omp for ordered
+    for( int t = 0; t < Nthreads; t++ )
+      {
+	for( num_t i = 0, p = 0; i < myNp; i++ ) {
+	  int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);	  
+	  switch( is_masked ) {
+	  case 1: {
+	    for( int m = 0; m < nmasks; m++ )
+	      {
+		int s = ( (PPP[i].fofid == masks[m].fof_num) &&
+			  ((PPP[i].gid == masks[m].ngal) ||
+			   (masks[m].ngal == -1)) );
+
+		switch( s != 0 ) {
+		case 1: fwrite( &outsnap_data[p], sizeof(outsnap_t), 1, FofGalFiles[m] ); break; }
+	      } } break; }
+	  p+= is_masked;
+	}
+      }
+    
+    free( p_is_masked[me] );
+    free( outsnap_data );
+  }
+  
+  for( int f = 0; f < nmasks; f++ )
+    fclose( FofGalFiles[f] );
+  
+  free( fname );
+  free( snapout_sizes );
+
+  
+  return 0;
+}
+
+
+

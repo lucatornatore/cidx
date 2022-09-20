@@ -23,6 +23,12 @@
 #include <unistd.h>
 #include <time.h>
 #include <float.h>
+#include <ctype.h>
+#if !defined(DEBUG)
+#define NDEBUG
+#endif
+#include <assert.h>
+
 #include <omp.h>
 #if defined(USE_MPI)
 #include <mpi.h>
@@ -65,7 +71,7 @@
 typedef unsigned int       ul_t;
 typedef unsigned long long ull_t;
 typedef long long int      ll_t;
-typedef unsigned long long int num_t;
+typedef unsigned long long num_t;
 typedef int                fgid_t;
 
 #if defined(LONG_IDS)
@@ -74,18 +80,36 @@ typedef unsigned long long PID_t;
 typedef unsigned int       PID_t;
 #endif
 
+#if defined(DOUBLE_OUT)
+typedef double float_out;
+#else
+typedef float float_out;
+#endif
+
 #define NTYPES 6
 #define ALL NTYPES
 
-typedef struct {PID_t pid; int type, gen; fgid_t fofid, gid;} particle_t;       // pid   is the gadget's ID of the particle
-                                                                                // fofid is the cardinal number of the fof the particle belongs to, sequentially read from the sub_ files 
-								                // gid   is the halo number the particle belong to, sequentially read from the sub_ files
-								                // type  is the gadget's type of the particle
-								                // gen   is the stellar generation, for type 4 particles
+typedef num_t nparts_t[NTYPES+1];
 
-typedef struct {PID_t pid; unsigned int fofid, gid;} list_t;
+typedef struct { int fof_num, ngal;             // a structure to specify which galaxy you want to mask 
+  nparts_t nparts;} mask_galaxies_in_fof_t;     // in a fof 
 
-typedef struct { PID_t pid; int gen, type; } pidtype_t;
+typedef struct { PID_t pid;                     // pid   is the gadget's ID of the particle
+  int type, gen, fofid;                         // fofid is the cardinal number of the fof the particle belongs to,
+  fgid_t gid;
+  int file, pos;} particle_t;                   //       sequentially read from the sub_ files
+                                                // gid   is the halo number the particle belong to,
+                                                //        sequentially read from the sub_ files
+	   		                        // type  is the gadget's type of the particle
+						// gen   is the stellar generation, for type 4 particles
+                                                // file  is the number of sub-file to which the particle belongs
+                                                // pos   is the position of the particle in the ID block of the file
+                                                // NOTE: file and pos are used to produce a snapshot-like file with the
+                                                //       desired quantities of selected particles
+
+typedef struct { PID_t pid; int fofid; fgid_t gid; } list_t;
+
+typedef struct { PID_t pid; int gen, type; int file, pos; } pidtype_t;
 
 typedef struct { int id_size, particle_t_size, nfiles, dummy; num_t Nparts, Nparts_total; } catalog_header_t;
 
@@ -93,9 +117,12 @@ typedef struct { int id_size, nfiles, type_is_present; num_t Nparts, Nparts_tota
 
 typedef struct { int fof_id; num_t TotN, Nparts[NTYPES]; fgid_t nsubhaloes; char *subh_occupancy;} fof_table_t;
 
+typedef struct { list_t idx; int type; float_out pos[3], vel2, pot; } outsnap_t;
+
 
 extern int     n_stars_generations, n_stars_generations_def;
 extern int     id_bitshift;
+extern int     shiftbox;
 extern int     verbose;
 extern FILE   *details;
 //extern FILE   *pdetails;
@@ -122,13 +149,21 @@ extern num_t   *Nparts_all[NTYPES+1];
 extern num_t    Np_all[NTYPES+1];
 extern num_t    Nl, myNl;
 
+extern mask_galaxies_in_fof_t *mask_fofgal;
+extern int      mask_fofgal_n;
+
+extern int      sizeof_in_data;
+extern int      sizeof_out_data;
+
+extern outsnap_t *outsnap_data;
+
 #define  Np Np_all[ALL]
 #define  myNp Nparts[ALL]
 
 
 extern PID_t    id_mask;
 
-#pragma omp threadprivate(me, P, Pbase, IDs, myNID, type_positions, Nparts, myNl, List, Types)
+#pragma omp threadprivate(me, P, Pbase, IDs, myNID, type_positions, Nparts, myNl, List, Types, outsnap_data)
 
 
 int   distribute_particles        ( void );
@@ -137,16 +172,20 @@ int   sort_thread_particles       ( num_t * );
 int   sort_thread_idtype          ( void );
 int   assign_type_to_subfind_particles( num_t *, num_t *, num_t *);
 PID_t get_stellargenerations_mask ( int, int * );
+PID_t get_unmasked_pid            ( PID_t, int, int );
 int   get_stellargenerations      ( PID_t, PID_t, int );
 int   get_subfind_data            ( char *, char *, num_t [4]);
 int   get_id_data                 ( char *, char *);
 int   get_catalog_data            ( char *, int *);
 int   get_list_ids                ( char *, int );
 int   make_fof_table              ( fof_table_t*, int, int );
+int   write_fofgal_ids            ( char *, char *, int );
+int   write_fofgal_snapshots      ( char *, char *, mask_galaxies_in_fof_t *, int );
 
 num_t partition_P_by_pid   ( const num_t, const num_t, const PID_t);
 num_t partition_IDs_by_pid ( const num_t, const num_t, const PID_t);
 num_t partition_P_by_type  ( const num_t, const num_t, const int  );
+num_t partition_P_by_file  ( const num_t, const num_t, const int  );
 
 int k_way_partition        ( const num_t, const num_t, const int, const int,
 			     const num_t *, num_t *restrict, int );
@@ -167,7 +206,7 @@ extern void* mybsearch_in_P       (const particle_t *, const num_t, const PID_t 
 #if defined(DEBUG)
 num_t check_partition             (const num_t, const num_t, const num_t, const PID_t, const int);
 num_t check_sorting               (const num_t, const num_t, const int);
-#define MASKED_ID_DBG             0
+//#define MASKED_ID_DBG             3093217
 #endif
 
 
@@ -225,6 +264,7 @@ extern int   Nlists;
 #define CREATE_CATALOGS     1
 #define SEARCH_PARTICLES    2
 #define BUILD_FOF_TABLE     4
+#define WRITE_MASK_FILES    8
 
 
 typedef int (*action_t)(char **, int, int);

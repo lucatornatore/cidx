@@ -136,7 +136,9 @@ int main( int argc, char **argv)
   // then let's do it
   //
   
-  if ( action & CREATE_CATALOGS )                             /* ------------------------ *
+  if ( (action & CREATE_CATALOGS ) ||
+       ( action & WRITE_MASK_FILES ) )
+                                                              /* ------------------------ *
                                                                *                          *
                                                                *    create catalogs       *
                                                                *                          *
@@ -166,9 +168,26 @@ int main( int argc, char **argv)
 	  exit(1);
 	}
 
+      /* if( action & WRITE_MASK_FILES ) */
+      /* 	{ */
+      /* 	  double tmask = CPU_TIME; */
+
+      /* 	  printf("Writing ids for fof 0\n" ); */
+
+      /* 	  write_fofgal_ids( working_dir_snap, snap_name, 0 ); */
+
+      /* 	  tmask = CPU_TIME - tmask; */
+      /* 	  PRINT_TIMINGS( "masking", "s", tmask ); */
+      /* 	} */
+
+      
+      // note: at this point the particles are evenly distributed among the
+      //       threads in the same order in which they appear in the subfind
+      //       files, i.e. clustered by fof and sub-haloes
+
       // ------------------------------------  
       // re-distribute the data among threads
-      //
+      // (particles are re-distributed by masked ids)
 
       if( Nthreads > 1 )
 	printf("\tre-distributing subfind data among threads..\n");
@@ -188,11 +207,12 @@ int main( int argc, char **argv)
 	}
 
       // ------------------------------------  
-      // load the IDs from the snapshot so that to reconstruct the types
+      // load the IDs from the snapshot so to reconstruct the types
       //
 
       printf("loading IDs and type data..\n");
       tstart = CPU_TIME;
+
       ret = get_id_data( working_dir_snap, snap_name );
       telapsed = CPU_TIME - tstart;
       PRINT_TIMINGS( "loading ids and type data", "s", telapsed );
@@ -210,7 +230,8 @@ int main( int argc, char **argv)
 	}
 
       // ------------------------------------  
-      // re-distribute the data among threads
+      // re-distribute the ID block in the snapshot
+      // among the threads
       //
       if ( Nthreads > 1 )
 	printf("\tre-distributing IDs and type data among threads..\n");
@@ -235,7 +256,10 @@ int main( int argc, char **argv)
      #pragma omp parallel
       {
 	// ------------------------------------  
-	//  assign a type to each subfind particle
+	//  assign to each subfind particle its type,
+	//  the number of snapshot file to which it
+	//  belongs and its position in the ID array
+	//  of that file
 	//
     
        #pragma omp single
@@ -288,14 +312,13 @@ int main( int argc, char **argv)
 	  free(all_IDs);
 	}
 
-
 	// ------------------------------------  
 	//  create a catalog table if required;
 	//  that is a table which summarize how
 	//  many particles of each type belong
 	//  to every fof and galaxy
 	//
-
+	
 	if( action & BUILD_FOF_TABLE )
 	  {	    
 	   #pragma omp master
@@ -331,164 +354,195 @@ int main( int argc, char **argv)
 	    }
 
 	  }
-	
-	// ------------------------------------  
-	//  partition the data in each thread by particle type
-	//
 
-       #pragma omp single
-	printf("partitioning particles by type in each thread..\n");
-        
-	{
-	  memset( type_positions, 0, sizeof(num_t)*NTYPES );
-	  num_t start = 0;
-	  num_t stop = myNp;
-
-	  telapsed = 0;
-	  for( int t = 0; t < NTYPES; t++ ) {
-	    type_positions[t] = partition_P_by_type( start, stop, t );
-	   #if defined(DEBUG)
-	    {
-	      num_t check = check_partition(start, stop, type_positions[t], (PID_t)t, 1);
-	      if ( check )
-		printf("[err] %d partitioning by type is broken at %llu\n",
-		       me, check);
-
-	     #if defined(MASKED_ID_DBG)
-	      for( num_t i = 0; i < myNp; i++ )
-		if( P[0][i].pid == MASKED_ID_DBG )
-		  dprint(0, me, "[ID DBG][P][th %d] found particle with masked id %llu, "
-			 "type %d, gen %d at pos %llu\n", me,
-			 (ull_t)P[0][i].pid, P[0][i].type, P[0][i].gen, i);	      
-	     #endif
-	      
-	    }
-	   #endif	
-	    start = type_positions[t]; }
-	  
-	 #if defined(DEBUG)
-	 #pragma omp single
-	  dprint(0, -1, "\tcheck of type partitioning done..\n");
-	 #endif
-
-	}
-    
-    
-	// ------------------------------------  
-	//  sort the data to create a catolog sorted by particle id
-	//
-
-       #pragma omp single
-	printf("sorting particles by id for each type in each thread..\n");
-
-	sort_thread_particles( type_positions );
-
-       #if defined(DEBUG)
-       #pragma omp single
-	dprint(0, -1, "\tcheck of subfind particles sorting by id..\n");
-
-	num_t ret = 0;
-	num_t start = 0;    
-	for( int t = 0; t < NTYPES; t++ ) {
-	  num_t stop = type_positions[t];
-	  ret += check_sorting( start, stop, 0);
-	  start = stop; }	
-	if( ret )
-	  printf("[err] thread %d :: sorting of particles by IDs is broken (%llu)\n",
-		 me, ret);
-
-       #if defined(MASKED_ID_DBG)
-	for( num_t i = 0; i < myNp; i++ )
-	  if( P[0][i].pid == MASKED_ID_DBG )
-	    dprint(0, me, "[ID DBG][S][th %d] found particle with masked id %llu, "
-		   "type %d, gen %d at pos %llu\n", me,
-		   (ull_t)P[0][i].pid, P[0][i].type, P[0][i].gen, i);	
-       #endif
-	
-       #endif
-
-	#pragma omp master
-	{
-	  Nparts_all[0] = (num_t*)malloc( (NTYPES+1)*Nthreads*sizeof(num_t));
-	  for ( int i = 1; i <= NTYPES; i++ )
-	    Nparts_all[i] = Nparts_all[i-1] + Nthreads;
-	}
-	#pragma omp barrier
-	
-	P_all[0][me] = P[0];
-	for( int t = 0; t < NTYPES; t++ )
-	  {
-	    Nparts[t] = ( t>0 ? type_positions[t] - type_positions[t-1] : type_positions[t]);
-	    if( t > 0 ) {
-	      P[t] = P[0] + type_positions[t-1];
-	      P_all[t][me] = P[t];
-	    }
-	    Nparts_all[t][me] = Nparts[t];
-	   #pragma omp atomic update
-	    Np_all[t] += Nparts[t];
-	  }
       }
-      telapsed = CPU_TIME - tstart;
-      PRINT_TIMINGS( "sorting", "s", telapsed );
-
-      
+       
       // ------------------------------------  
-      // write the catalog files
+      //  write files for masked particles
       //
-  
-      printf("creating catalogs..\n");
-
-      FILE **catalog_files = malloc( NTYPES * sizeof(FILE*) );
-
-      tstart = CPU_TIME;
-
-      for( int t = 0; t < NTYPES; t++ )
+            
+      if( action & WRITE_MASK_FILES )
 	{
-	  char name[CATALOG_NAME_SIZE+10];
-	  sprintf( name, "%s%d", catalog_name, t);
-	  catalog_files[t] = fopen( name, "w" );
+	  double tmask = CPU_TIME;
+
+	  printf("Writing files for %d masked fofs\n", mask_fofgal_n );
+
+	  write_fofgal_snapshots( working_dir_snap, snap_name, mask_fofgal, mask_fofgal_n );
+
+	  tmask = CPU_TIME - tmask;
+	  PRINT_TIMINGS( "masking", "s", tmask );
+	}
       
-	  if( catalog_files[t] == NULL )
-	    {
-	      for( int j = t-1; j>=0; j-- )
-		fclose(catalog_files[j]);
+
+      if( action & CREATE_CATALOGS )
+	{
 	  
-	      printf("got a problem while creating catalog file %s, aborting\n",
-		     name );
-	      exit(11);
+	 #pragma omp parallel
+	  {
+    
+	    /* if ( action & CREATE_CATALOGS ) */
+	    /*   { */
+	    
+	    // ------------------------------------  
+	    //  partition the data in each thread by particle type
+	    //
+	
+	   #pragma omp single
+	    printf("partitioning particles by type in each thread..\n");
+        
+	    {
+	      memset( type_positions, 0, sizeof(num_t)*NTYPES );
+	      num_t start = 0;
+	      num_t stop = myNp;
+
+	      telapsed = 0;
+	      for( int t = 0; t < NTYPES; t++ ) {
+		type_positions[t] = partition_P_by_type( start, stop, t );
+	       #if defined(DEBUG)
+		{
+		  num_t check = check_partition(start, stop, type_positions[t], (PID_t)t, 1);
+		  if ( check )
+		    printf("[err] %d partitioning by type is broken at %llu\n",
+			   me, check);
+
+		 #if defined(MASKED_ID_DBG)
+		  for( num_t i = 0; i < myNp; i++ )
+		    if( P[0][i].pid == MASKED_ID_DBG )
+		      dprint(0, me, "[ID DBG][P][th %d] found particle with masked id %llu, "
+			     "type %d, gen %d at pos %llu\n", me,
+			     (ull_t)P[0][i].pid, P[0][i].type, P[0][i].gen, i);	      
+		 #endif
+	      
+		}
+	       #endif	
+		start = type_positions[t]; }
+	  
+	     #if defined(DEBUG)
+	     #pragma omp single
+	      dprint(0, -1, "\tcheck of type partitioning done..\n");
+	     #endif
+
+	    }
+    
+    
+	    // ------------------------------------  
+	    //  sort the data to create a catolog sorted by particle id
+	    //
+
+	   #pragma omp single
+	    printf("sorting particles by id for each type in each thread..\n");
+
+	    sort_thread_particles( type_positions );
+
+	   #if defined(DEBUG)
+	   #pragma omp single
+	    dprint(0, -1, "\tcheck of subfind particles sorting by id..\n");
+
+	    num_t ret = 0;
+	    num_t start = 0;    
+	    for( int t = 0; t < NTYPES; t++ ) {
+	      num_t stop = type_positions[t];
+	      ret += check_sorting( start, stop, 0);
+	      start = stop; }	
+	    if( ret )
+	      printf("[err] thread %d :: sorting of particles by IDs is broken (%llu)\n",
+		     me, ret);
+
+	   #if defined(MASKED_ID_DBG)
+	    for( num_t i = 0; i < myNp; i++ )
+	      if( P[0][i].pid == MASKED_ID_DBG )
+		dprint(0, me, "[ID DBG][S][th %d] found particle with masked id %llu, "
+		       "type %d, gen %d at pos %llu\n", me,
+		       (ull_t)P[0][i].pid, P[0][i].type, P[0][i].gen, i);	
+	   #endif
+	
+	   #endif
+
+	   #pragma omp master
+	    {
+	      Nparts_all[0] = (num_t*)malloc( (NTYPES+1)*Nthreads*sizeof(num_t));
+	      for ( int i = 1; i <= NTYPES; i++ )
+		Nparts_all[i] = Nparts_all[i-1] + Nthreads;
+	    }
+	   #pragma omp barrier
+	
+	    P_all[0][me] = P[0];
+	    for( int t = 0; t < NTYPES; t++ )
+	      {
+		Nparts[t] = ( t>0 ? type_positions[t] - type_positions[t-1] : type_positions[t]);
+		if( t > 0 ) {
+		  P[t] = P[0] + type_positions[t-1];
+		  P_all[t][me] = P[t];
+		}
+		Nparts_all[t][me] = Nparts[t];
+	       #pragma omp atomic update
+		Np_all[t] += Nparts[t];
+	      }
+	  }
+	  telapsed = CPU_TIME - tstart;
+	  PRINT_TIMINGS( "sorting", "s", telapsed );
+
+      
+	  // ------------------------------------  
+	  // write the catalog files
+	  //
+	  
+	  printf("creating catalogs..\n");
+	  
+	  FILE **catalog_files = malloc( NTYPES * sizeof(FILE*) );
+	  
+	  tstart = CPU_TIME;
+	  
+	  for( int t = 0; t < NTYPES; t++ )
+	    {
+	      char name[CATALOG_NAME_SIZE+10];
+	      sprintf( name, "%s%d", catalog_name, t);
+	      catalog_files[t] = fopen( name, "w" );
+      
+	      if( catalog_files[t] == NULL )
+		{
+		  for( int j = t-1; j>=0; j-- )
+		    fclose(catalog_files[j]);
+	  
+		  printf("got a problem while creating catalog file %s, aborting\n",
+			 name );
+		  exit(11);
+		}
+
+	      printf("\tcatalog %s will have %llu particles\n",
+		     name, Np_all[t]);
+
+	      catalog_header_t catalog_header = {0};
+	      catalog_header.id_size = (int)sizeof(PID_t);
+	      catalog_header.nfiles = 1;
+	      catalog_header.particle_t_size = (int)sizeof(particle_t);
+	      catalog_header.Nparts = Np_all[t];                               // particles in this file
+	      // writing of multiple files has yet to be
+	      // implemented
+	      catalog_header.Nparts_total = Np_all[t];                         // total number of particles
+
+	      fwrite( &catalog_header, sizeof(catalog_header_t), 1, catalog_files[t] );        
+
+	  
+	     #pragma omp parallel for ordered
+	      for( int th = 0; th < Nthreads; th++ )
+	       #pragma omp ordered                  // force a pid-ordered writing
+		write_particles( catalog_files[t], t );
+
+	      fclose( catalog_files[t] );
 	    }
 
-	  printf("\tcatalog %s will have %llu particles\n",
-		 name, Np_all[t]);
+	  free(catalog_files);
 
-	  catalog_header_t catalog_header = {0};
-	  catalog_header.id_size = (int)sizeof(PID_t);
-	  catalog_header.nfiles = 1;
-	  catalog_header.particle_t_size = (int)sizeof(particle_t);
-	  catalog_header.Nparts = Np_all[t];                               // particles in this file
-									   // writing of multiple files has yet to be
-									   // implemented
-	  catalog_header.Nparts_total = Np_all[t];                         // total number of particles
-
-	  fwrite( &catalog_header, sizeof(catalog_header_t), 1, catalog_files[t] );        
-
-	  
-	 #pragma omp parallel for ordered
-	  for( int th = 0; th < Nthreads; th++ )
-	   #pragma omp ordered                  // force a pid-ordered writing
-	    write_particles( catalog_files[t], t );
-
-	  fclose( catalog_files[t] );
+	  telapsed = CPU_TIME - tstart;
+	  PRINT_TIMINGS( "writing catalogs", "s", telapsed );	  
 	}
 
-      telapsed = CPU_TIME - tstart;
-      PRINT_TIMINGS( "writing catalogs", "s", telapsed );
       
-      free(catalog_files);
+      
   
   
       if( !( action & SEARCH_PARTICLES) ){
-	free( Nparts_all[0] );
 	for( int t = 0; t < NTYPES; t++ )
 	  free( P_all[t] );
        #pragma omp parallel
@@ -653,9 +707,9 @@ int main( int argc, char **argv)
 			    // particle's been found
 
 			    particle_t *stop = P_all[t][target_thread];
-			    while( (res>stop) && (res-1)-> pid == masked_id && res-> gen > generation ) --res;
+			    while( (res>stop) && ((res-1)-> pid == masked_id) && (res-> gen > generation) ) --res;
 			    stop += Nparts_all[t][target_thread];
-			    while( res < stop && (res+1)-> pid == masked_id && res-> gen < generation ) ++res;
+			    while( res < stop && ((res+1)-> pid == masked_id) && (res-> gen < generation) ) ++res;
 
 			    if(res-> gen != generation) {
 			     #if defined(DEBUG) && defined(MASKED_ID_DBG)

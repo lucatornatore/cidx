@@ -3,6 +3,7 @@
 
 int     n_stars_generations, n_stars_generations_def = 4;
 int     id_bitshift;
+int     shiftbox = 0;
 int     verbose = 0;
 FILE   *details = NULL;
 //FILE   *pdetails = NULL;
@@ -30,7 +31,20 @@ num_t   *Nparts_all[NTYPES+1] = {NULL};
 num_t    Np_all[NTYPES+1]     = {0};
 
 
-num_t   Nl, myNl;
+num_t  Nl, myNl;
+
+mask_galaxies_in_fof_t *mask_fofgal = NULL;
+int    mask_fofgal_n = 0;
+
+int    sizeof_in_data = 4;
+
+#if defined(DOUBLE_OUT)
+int    sizeof_out_data = sizeof(double);
+#else
+int    sizeof_out_data = sizeof(float);
+#endif
+
+outsnap_t *outsnap_data = NULL;
 
 PID_t   id_mask = 0;
 
@@ -96,6 +110,64 @@ int action_make_foftable( char **argv, int n, int mode )
     action |= BUILD_FOF_TABLE;
   return n;
 }
+
+int action_create_snapshots( char **argv, int n, int mode )
+{
+  UNUSED(argv);
+  UNUSED(n);
+  UNUSED(mode);
+  if( mode > 0 )
+    action |= WRITE_MASK_FILES;
+  return n;
+}
+
+int set_mask_fofgal( char **argv, int n, int mode )
+{
+  if( mode > 0 )
+    {
+      int fof_id = -1;
+      int first = 1;
+      n++;
+      while( (n<mode) && (**(argv + n) != '-' ) )
+	{	  
+	  if ( isdigit( **(argv+n) ) )
+	    {
+	      if( (!first ) || (fof_id < 0) ) {
+		mask_fofgal = (mask_galaxies_in_fof_t*)realloc( mask_fofgal, sizeof(mask_galaxies_in_fof_t)*(++mask_fofgal_n));
+		memset( &mask_fofgal[mask_fofgal_n-1], 0, sizeof(mask_galaxies_in_fof_t) ); }
+	      
+	      int gal_id = -1;
+	      if( fof_id < 0 ) fof_id = atoi( *(argv + n++) );
+	      else { gal_id = atoi( *(argv + n++) ); first = 0; }
+	      
+	      mask_fofgal[mask_fofgal_n-1].fof_num = fof_id;
+	      mask_fofgal[mask_fofgal_n-1].ngal    = gal_id;
+	      
+	    }
+	  else if ( **(argv+n) != '-' )
+	    printf("arg %d [\" %s \" ]is meaningless\n", n, *(argv+n) );
+	}
+
+      n--;
+    }
+  else
+    {
+      if( mask_fofgal != NULL ) {
+	free( mask_fofgal );
+	mask_fofgal = NULL; }	
+    }
+
+  return n;
+}
+
+
+int set_shiftbox( char **argv, int n, int mode )
+{
+  UNUSED(argv);
+  shiftbox = ( mode > 0 );
+  return n;
+}
+
 
 int set_snapf( char **argv, int n, int mode)
 {
@@ -256,8 +328,12 @@ arg_t args[] = {
 		{"-s", "", "", "", 1, action_search_particles },
 		{"-sp", "", "", "", 1, action_search_particles },
 		{"-search", "", "", "", 1, action_search_particles },
+		
+		{"-t", "not active", "write a table with fof properties", "", -1, action_make_foftable },
 
-		{"-t", "", "", "", 2, action_make_foftable },
+		{"-w", "not active", "create snapshots with particles from the masked fof/galaxies", "", -1, action_create_snapshots },
+
+		{"-m", "none", "set the masked fof/galaxies, you may have as many as you want", "-m FOFN [gal num1] [gal num2] [gal num 3] ...", -1, set_mask_fofgal },
 
 		{"-snapf", "%%s+snapnum", "specify the basename of snapshot files", "[snap name]", -1, set_snapf },
 
@@ -272,6 +348,8 @@ arg_t args[] = {
 		{"-num", "", "specify the snap/subfind number", "[num]", -1, set_num },
 
 		{"-g", "4", "specify the number of stellar generation to consider", "[num]", -1, set_stellargenerations },
+
+		{"-shiftbox", "0", "add -(boxsize/2) to positions", "[0|1]", -1, set_shiftbox },
 
 		{"-list", "", "add list file", "[path/to/file_name] [type]\n\t"
 		 "where type is in <-2,-1,[0..5]>\n\t"

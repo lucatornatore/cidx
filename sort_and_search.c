@@ -27,6 +27,19 @@ typedef struct { PID_t pid; int gen; } pidgen_t;
 #define QS_SWAP_TYPE 0
 #include "qsort_template.h"
 
+
+/* #define QS_NAME fofparticle_type */
+/* #define QS_DATA_ALIGN  ALIGN */
+/* #define QS_DATA_TYPE   particle_t */
+/* #define QS_DATA_SIZE   (sizeof( particle_t )) */
+/* #define KEY_DATA_TYPE  int */
+/* #define KEY_COPY(P, A) { (P).type = (A)->type; (P).type = (A)->type; } */
+/* #define CMP_KEY(A, B)  (int)( (((A).type > (B)->type) - ((A).type < (B)->type)) + ((((A).type > (B)->type) - ((A).type < (B)->type))==0)) */
+/* #define CMP(A, B)      (int)( (((A)->type > (B)->type) - ((A)->type < (B)->type)) + ((((A)->type > (B)->type) - ((A)->type < (B)->type))==0)) */
+/* #define QS_SWAP_TYPE 0 */
+/* #include "qsort_template.h" */
+
+
 #endif  // closes USE_LIBC_QSORT
 
 

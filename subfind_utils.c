@@ -66,9 +66,6 @@ int mask_ids_and_find_ranges( const PID_t id_mask, const int bitshift, num_t *ra
 	  case 2: ID = IDs[i].pid; break;
 	  default: ID = 0;
 	  }
-	if( ID == 0 )
-	  printf("th %d warns:: particle %llu has ID 0\n",
-		 me, i );
 	//id_size_alert += ( ID > id_mask );
 	masked_id = ID & id_mask;
 	int  gen       = ID >> bs;
@@ -295,6 +292,63 @@ inline num_t partition_P_by_type( const num_t start, const num_t stop, const int
 }
 
 
+inline num_t partition_P_by_file( const num_t start, const num_t stop, const int V)
+/*
+ * This routine does the partitioning of the particles of each thread by a given snapshot file number.
+ * At the end, the particles in the PPP (i.e. P[0]) array are divided in 2 bunches: the first
+ * one contains all the particles of a given type while the second one contains all the
+ * other particles.
+ *
+ * start : the starting point in the PP array
+ * end   : the end point in the PPP array
+ * v     : the value to partition by
+ */
+{
+  if( start >= stop )
+    return start + (start < myNp ? PPP[start].file < V : 0);
+  
+  num_t j = start;
+  register int myV = V;
+
+  while( (j < stop) && (PPP[j].file <= myV) )
+    j++;
+  
+  if ( j == stop )
+    return stop;
+
+  num_t stop_1 = stop - 1;
+  int   A;
+  register particle_t *ptr;
+
+  A   = PPP[j].file;
+  ptr = &PPP[j];
+  
+  do
+    {      
+      switch(A > myV) {
+      case 1: {
+	  ++j;
+	  __builtin_prefetch(&PPP[j+1].file, 0, 3);
+	  A = PPP[j].file;
+      } break;
+      default: {
+	  __builtin_prefetch(&PPP[j+1].file, 0, 3);
+	  XCHG_P(ptr, &PPP[j]);
+	  
+	  ptr++;
+	  A = PPP[++j].file; } break;
+      }
+    }
+  while( j < stop_1 );
+
+  if( PPP[stop_1].file <= myV ) {
+    XCHG_P( ptr, &PPP[stop_1]); ptr++; }
+
+
+  return (num_t)(ptr - PPP);
+}
+
+
 int k_way_partition( const num_t start, const num_t stop, const int start_range, const int stop_range,
 		     const num_t *ranges, num_t *restrict positions, int mode)
 /*
@@ -313,7 +367,8 @@ int k_way_partition( const num_t start, const num_t stop, const int start_range,
  *                of each partition
  * mode         : 0 means partition PPP by id
  *                1 means partition PPP by type
- *                2 measn partitions ids by id
+ *                2 means partition ids by id
+ *                3 means partition PPP by the snapshot's subfile
  *
  * note: this function is recursive
  */
@@ -326,6 +381,7 @@ int k_way_partition( const num_t start, const num_t stop, const int start_range,
     case 0: positions[Nhalf] = partition_P_by_pid(start, stop, ranges[Nhalf]); break;
     case 1: positions[Nhalf] = partition_P_by_type(start, stop, ranges[Nhalf]); break;
     case 2: positions[Nhalf] = partition_IDs_by_pid(start, stop, ranges[Nhalf]); break;
+    case 3: positions[Nhalf] = partition_P_by_file(start, stop, ranges[Nhalf]); break;
     }
   PAPI_STOP;
 
@@ -392,6 +448,16 @@ num_t check_partition(const num_t start, const num_t stop, const num_t pivot, co
 	if( ii < stop - 1)                    // check the second part
 	  for(; ii < stop; ii++)
 	    tmp += (IDs[ii].pid < V);
+      } break;
+    case 3:
+      {
+	int iV = (int)V;
+	for(ii = start; ii < pivot; ii++)     // check the first part
+	  tmp += (PPP[ii].file > iV);
+	
+	if( ii < stop - 1)                    // check the second part
+	  for(; ii < stop; ii++)
+	    tmp += (PPP[ii].file < iV);
       } break;
     }
 
@@ -921,6 +987,16 @@ int compare_pid_with_particle_t( const void *A, const void *B )
 }
 
 
+int compare_type_in_fofparticle_t( const void *A, const void *B )
+{
+  PID_t idA = ((particle_t*)A)->type;
+  PID_t idB = ((particle_t*)B)->type;
+  
+  int  res = ( idA > idB ) - ( idA < idB );
+
+  return res;
+}
+
 int sort_thread_particles( num_t *positions )
 {
 
@@ -953,6 +1029,19 @@ int sort_thread_idtype( void )
 }
 
 
+/* int sort_thread_fofparticles_by_type( particle_t *pp, num_t N ) */
+/* { */
+
+/*  #if !defined(USE_LIBC_QSORT) */
+/*   inline_qsort_fofparticles_type( (void*)pp, N); */
+/*  #else */
+/*   qsort( (void*)pp, (size_t)N, sizeof(particle_t), compare_type_in_fofparticle_t); */
+/*  #endif */
+  
+/*   return 0; */
+/* } */
+
+
 int assign_type_to_subfind_particles( num_t *o_of_r, num_t *range_failures, num_t *gen_failures)
 {
   /* FILE *FILE; */
@@ -969,6 +1058,8 @@ int assign_type_to_subfind_particles( num_t *o_of_r, num_t *range_failures, num_
       
       int target_thread = 0;
 
+      PPP[j].type = -1;
+      
       while( (target_thread < Nthreads) && (PPP[j].pid > IDranges[target_thread]) )
 	target_thread++;
 
@@ -1001,17 +1092,20 @@ int assign_type_to_subfind_particles( num_t *o_of_r, num_t *range_failures, num_
 	    while( res < stop && (res+1)-> pid == pid && res-> gen != gen ) ++res;
 	    if( res->gen != gen )
 	      gen_fails++;
-	    else PPP[j].type = res->type; }
+	    else { PPP[j].type = res->type; PPP[j].file = res->file; PPP[j].pos = res->pos; }}
 	  else {
 	    range_fails++;
 	   #if defined(DEBUG)
 	    fprintf(stderr, "th %d: id %llu failed in searching on thread %d (%llu %llu)\n",
-		    me, PPP[j].pid, target_thread,
-		    all_IDs[target_thread][0].pid,
+		    me, (long long unsigned)PPP[j].pid, target_thread,
+		    (long long unsigned)all_IDs[target_thread][0].pid,
 		    IDranges[target_thread]);
 	   #endif
 	  }
 
+	  if( (PPP[j].type < 0) || (PPP[j].type > NTYPES-1) )
+	    printf("uellaaaa\n");
+	    
 	 #if defined(DEBUG) && defined(MASKED_ID_DBG)
 	  if( PPP[j].pid == MASKED_ID_DBG )
 	    dprint(0, me, "[ID DBG][A][th %d] found particle with masked id %llu, "
