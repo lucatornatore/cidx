@@ -14,9 +14,9 @@ FPIC       = "-fPIC"
 
 EXEC_NAME  =cidx
 
-LONG_IDS   =on
+LONG_IDS   =off
 PRODUCTION =on
-DEBUG      =on
+DEBUG      =off
 
 DEBUG_INFO =off
 SANITIZE   =off
