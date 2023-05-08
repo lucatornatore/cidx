@@ -199,6 +199,28 @@ num_t seek_block ( FILE *file, char name[5] )
 }
 
 
+int get_snap_detail( FILE *file, int detail, void *result )
+{
+  int ret = seek_block( file, "HEAD");
+  
+  if ( ret == 0)
+    {
+      printf("unable to find the HEAD block in snapshot files\n");
+      return -1;
+    }
+
+  snapheader_t header;
+  
+  ret = fread( &header, sizeof(snapheader_t), 1, file);
+
+  switch(detail)
+    {
+    case EXP_FACTOR: *(double*)result = header.time; break;
+    }
+
+  return 0;
+}
+
 
 int get_particles_num( FILE *file, nparts_t *nparts, int mode )
 {
@@ -263,6 +285,7 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
   #define FofP  2
   #define SubHP 3
   memset( HowMany, 0, 4*sizeof(num_t) );
+  
   {
     nparts_t nparts;
     
@@ -306,7 +329,7 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
   // therein, because that useful number is not present in the files' header
 
   // >>> NOTE: for the sake of simplicity, we load up all the fofs and haloes even
-  //           if there is a fof/halo masking
+  //           if at command line a fof/halo masking has been specified
   
   PID_t Nhaloes            = 0;  
   PID_t Nfofs              = 0;
@@ -375,8 +398,8 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 	  for( unsigned int i = 0; i < nsubh; i++ )
 	    {
 	      haloes[ Nhaloes + i ].parent = buffer[i];
-	      hidx *= ( buffer[i] == prev_parent);
-	      haloes[ Nhaloes + i ].index  = hidx;
+	      hidx = ( buffer[i] == prev_parent ? hidx : 0); // if the parent has changed, sets hidx to zero
+	      haloes[ Nhaloes + i ].index  = hidx;           // hidx is the ordinal number of this halo in the parent fof
 	      hidx++;
 	      prev_parent = buffer[i];
 	    }
@@ -414,17 +437,26 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
   int failures = 0;
   #pragma omp parallel
   {
-
-    int rem  = (int)(Np % (num_t)Nthreads);
-    myNp     = Np / Nthreads + (me < rem);
-    PPP      = (particle_t*)calloc( myNp, sizeof(particle_t));
-    
+    // the avg # of particles per thread
+    //
     PID_t avg_Np  = Np / Nthreads;
-    ll_t  fofn   = 0;
-    ll_t  hn      = 0;
-    int   fn      = 0;
+
+    // the actual number accounts for the reminder
+    //
+    int rem       = (int)(Np % (num_t)Nthreads);
+    myNp          = avg_Np + (me < rem);
+    PPP           = (particle_t*)calloc( myNp, sizeof(particle_t));    
+
+    // myoff is the starting particle of my bunch
+    // of particles
+    //
     num_t myoff   = avg_Np * me;
     myoff  += ( me > rem ? rem : me );
+
+    
+    ll_t  fofn    = 0;
+    ll_t  hn      = 0;
+    int   fn      = 0;
 
     num_t in_fof_off  = 0;
     num_t halo_read   = 0;
@@ -433,20 +465,28 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 
     int  _failures_ = 0;
     num_t particles_off;
-    
+
+    // find the fof to which my first particle belongs
+    //    
     while( (fofn < (ll_t)Nfofs) && (myoff > fofs[fofn+1].offset) )   // note: using fofn+1 is safe because
       fofn++;						             // fofs has Nfofs+1 elements
     
-    // find the offset inside the fof
+    // find the offset inside that fof
     in_fof_off = myoff - fofs[fofn].offset;
     fof_read   = in_fof_off;
-    //read       = in_fof_off;
-    
+
+    // find the halo to which my first particle belongs
+    //
     while( (hn < (ll_t)Nhaloes) && (myoff > haloes[hn+1].offset) )   // note: same here as for hn+1
       hn++;
     hn += ( myoff > haloes[hn].offset + haloes[hn].npart );    // in case myoff falls at the end of a fof
                                                                // where its haloes are finished and those
                                                                // of the next fof did not start yet.
+
+    // find the offset inside that halo
+    // hn is set negative if my first particle falls among
+    // the unbound particles of a fof
+    //
     if( hn < (ll_t)Nhaloes )
       {
 	ul_t in_halo_off = 0;
@@ -463,27 +503,47 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
     dprint(2,me, "[sf data] thread %d is getting %llu particles, "
 	   "starting from halo %lld off %llu , shalo %lld off %llu\n",
 	   me, myNp, fofn, in_fof_off, hn, halo_read);
-    
+
+
+    // now read my particles from the appropriate files
+    //
     while( (read < myNp) && (fofn < (ll_t)Nfofs) && (hn < (ll_t)Nhaloes) && !_failures_ )
       {
 
+	// particles_off is the current position of reading 
+	// i.e. the "coordinate" of the last particles that I've read
+	// from the begininning of the particles (i.e. 0)
+	//
 	particles_off = myoff + read;
-	  
+
+	// find which is the file that I must read from
+	//
 	while( (fn < nfiles) && ( particles_off >= files[fn].npart_inc) )
 	  fn++;
 	
 	if ( fn < nfiles )
 	  {
 
+	    // find the offset inside the file
+	    // remind: npart_inc is the incremental number of particles,
+	    //         accounting also for this file's particles;
+	    //         npart is the num of particles in this file
+	    //
 	    num_t in_file_off = particles_off - (files[fn].npart_inc - files[fn].npart); // that is zero when this is not the first file we read
-	    
+
+	    // determine how many particles I must read from this file
+	    //
 	    num_t howmany_toread = files[fn].npart - in_file_off;
-	    
+
+	    // allocate enough room for data
+	    //
 	    PID_t *buffer = (PID_t*)calloc( howmany_toread, sizeof(PID_t) );
 	    
 	    omp_set_lock( &files[fn].lock );
 	    
-	    /* DPRINT( 2, -1, "[ I/O ] [ th %d ] is opening file %u to read %llu particles starting from %llu from halo %u with halo_read %llu and in_halo_offset %llu: total read particles are %llu -> %llu / %llu\n",		     */
+	    /* DPRINT( 2, -1, "[ I/O ] [ th %d ] is opening file %u to read %llu particles starting " */
+            /*         "from %llu from halo %u with halo_read %llu and in_halo_offset %llu: "" */
+	    /*         "total read particles are %llu -> %llu / %llu\n",		     */
 	    /* 	    me, fn, howmany_toread, in_file_off, hn, halo_read, in_halo_off, read, read+howmany_toread, (num_t)myNp); */
 	    /* DPRINT(2, -1, "[ I/O ] [ th %d ] ---- file %d --- %llu %llu %llu %llu\n", me, fn, */
 	    /* 	   haloes[hn].offset, in_halo_off, files[fn].npart_inc, files[fn].npart ); */
@@ -502,8 +562,11 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 
 	      if ( in_file_off > 0 )                                                      // skip initial data if needed
 		{
+		  // this returns the current position, i.e. the begin of the block
 		  off_t before = ftello( files[fn].ptr );
+		  // jump ahead in_file_off data
 		  fseeko( files[fn].ptr, (off_t)(in_file_off*sizeof(PID_t)), SEEK_CUR );
+		  // get the position again
 		  off_t after = ftello( files[fn].ptr );
 		  
 		  if( (num_t)(after-before) != (num_t)(in_file_off*sizeof(PID_t) )) {     // check that we skipped the right amount of data
@@ -571,7 +634,7 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 			hn++;
 			halo_read = 0;
 			if( haloes[hn].offset > particles_off + i )
-			  // if we are in fof-onyl region
+			  // if we are in fof-only region
 			  // disable the subhalo
 			  hn = -hn;
 		      }
@@ -1653,7 +1716,7 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	  outsnap_data[p].idx.gid   = PPP[i].gid;
 	  outsnap_data[p].type      = PPP[i].type; p++; } break; }
       }
-    printf("\t[thread %d] %llu particles masked\n", me, (unsigned long long)p);
+    //printf("\t[thread %d] %llu particles masked\n", me, (unsigned long long)p);  // just for debug
 
     // partition particles by the file they belong to
 
@@ -1710,10 +1773,10 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
   // [ 4 ]
   // loops over snapshot files and get particles
     
-
-  int   nfiles;
-  char *fname = (char*)malloc( strlen(wdir) + strlen(snapname) + 10 );  
-  nfiles = check_number_of_files(wdir, snapname);
+  double  exp_factor;
+  int     nfiles;
+  char   *fname = (char*)malloc( strlen(wdir) + strlen(snapname) + 10 );  
+  nfiles        = check_number_of_files(wdir, snapname);
   
   for ( int f = 0; f < nfiles; f++ )
     {
@@ -1726,8 +1789,11 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	sprintf( fname, "%s/%s", wdir, snapname );
       filein = fopen( fname, "r" );
 
+      if ( f == 0 )
+	get_snap_detail( filein, EXP_FACTOR, &exp_factor);
+      
       nparts_t nparts;
-      get_particles_num( filein, &nparts, 1 );      
+      get_particles_num( filein, &nparts, 1 ); 
 
       char *block = (char*)malloc(max_size_per_particle * nparts[ALL]);
 
@@ -1780,9 +1846,9 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	      case 1: { double v2 = 0;
 		  if( sizeof_in_data == sizeof(float) ) {
 		    for( int j = 0; j < 3 ; j++ )
-		      v2 += *((float*)block + PPP[i].pos*3 + j)* *((float*)block + PPP[i].pos*3 + j); }
+		      v2 += *((float*)block + PPP[i].pos*3 + j)* *((float*)block + PPP[i].pos*3 + j) * exp_factor; }
 		  else { for( int j = 0; j < 3 ; j++ )
-		      v2 += *((double*)block + PPP[i].pos*3 + j)* *((double*)block + PPP[i].pos*3 + j); }
+		      v2 += *((double*)block + PPP[i].pos*3 + j)* *((double*)block + PPP[i].pos*3 + j) * exp_factor; }
 		  outsnap_data[p].vel2 = v2; p++; }
 	      default: break;
 	      }
@@ -1877,7 +1943,12 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
       size = sizeof_out_data;
       fwrite( &size, sizeof(int), 1, FofGalFiles[f] );
     }
-    
+
+
+  FILE *idfile = NULL;
+  /* idfile = fopen("ids_file.dat", "w"); */
+  /* fwrite( &snapout_sizes[0], sizeof(num_t), 1, FofGalFiles[f] ); */
+  
   #pragma omp parallel
   {
     char *_pmasked_ = p_is_masked[me];

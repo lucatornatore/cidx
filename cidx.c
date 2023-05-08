@@ -137,7 +137,8 @@ int main( int argc, char **argv)
   //
   
   if ( (action & CREATE_CATALOGS ) ||
-       ( action & WRITE_MASK_FILES ) )
+       ( action & WRITE_MASK_FILES ) ||
+       ( action & BUILD_FOF_TABLE ) )
                                                               /* ------------------------ *
                                                                *                          *
                                                                *    create catalogs       *
@@ -145,6 +146,10 @@ int main( int argc, char **argv)
 							       * ------------------------ */
     {
 
+     #define Fof   0
+     #define SubH  1
+     #define FofP  2
+     #define SubHP 3
       num_t HowMany[4];
       
       // ------------------------------------
@@ -153,7 +158,7 @@ int main( int argc, char **argv)
 
       printf("loading subfind data..\n");
       tstart = CPU_TIME;
-      ret = get_subfind_data( working_dir_subf, subf_name, &HowMany[0] );
+      ret = get_subfind_data( working_dir_subf, subf_name, HowMany );
       telapsed = CPU_TIME - tstart;
       PRINT_TIMINGS( "getting subfind data", "s", telapsed );      
       
@@ -168,6 +173,59 @@ int main( int argc, char **argv)
 	  exit(1);
 	}
 
+      memset(diagnostic, 0, sizeof(num_t)*2);
+     #pragma omp parallel
+      get_howmany_in_subhaloes ( &diagnostic );
+
+      printf("***** [D] %llu in shaloes, %llu in fof %d\n", diagnostic[0], diagnostic[1], FOFDBG );
+
+
+      // ------------------------------------  
+      //  create a catalog table if required;
+      //  that is a table which summarize how
+      //  many particles of each type belong
+      //  to every fof and galaxy
+      //
+      
+      if( action & BUILD_FOF_TABLE )
+	{	    
+	  printf("building fof table..\n");
+	  fof_table = (fof_table_t*)calloc(HowMany[Fof] , sizeof(fof_table_t));
+
+	 #pragma omp parallel
+	  make_fof_table( fof_table, HowMany[Fof], 1 );	  	 
+
+	  FILE *file = fopen( catalog_table_name, "w" );
+	  
+	  for( num_t i = 0; i < HowMany[Fof]; i++ )
+	    {
+	      fprintf(file, "%10llu\t%lld\t%llu\t", i, (long long int)fof_table[i].nsubhaloes, fof_table[i].TotN );
+	      
+	      num_t subh_occupancy = 0;
+	      for( int s = 0; s < fof_table[i].nsubhaloes; s++ ) {
+		subh_occupancy += fof_table[i].subh_occupancy[s];
+		if (fof_table[i].subh_occupancy[s] == 0)
+		  printf(">>>> fof %llu has got sub-halo %u with 0 occupancy\n", i,s ); }
+	      free( fof_table[i].subh_occupancy );
+	      
+	      fprintf(file, "%llu\t*\t", subh_occupancy);
+	      
+	      for( int j = 0; j < NTYPES; j++ )
+		fprintf(file, "\t%10llu", fof_table[i].Nparts[j] );
+	      fprintf(file, "\n");
+	    }	    
+	  
+	  fclose(file);
+	  free( fof_table );
+	  
+	}
+
+      
+      if ( !( (action & CREATE_CATALOGS ) ||
+	      ( action & WRITE_MASK_FILES ) ) )
+	return;
+
+      
       /* if( action & WRITE_MASK_FILES ) */
       /* 	{ */
       /* 	  double tmask = CPU_TIME; */
@@ -185,6 +243,7 @@ int main( int argc, char **argv)
       //       threads in the same order in which they appear in the subfind
       //       files, i.e. clustered by fof and sub-haloes
 
+      
       // ------------------------------------  
       // re-distribute the data among threads
       // (particles are re-distributed by masked ids)
@@ -205,7 +264,8 @@ int main( int argc, char **argv)
 	  }
 	  exit(2);
 	}
-
+      
+      
       // ------------------------------------  
       // load the IDs from the snapshot so to reconstruct the types
       //
@@ -228,6 +288,7 @@ int main( int argc, char **argv)
 	  }
 	  exit(3);
 	}
+
 
       // ------------------------------------  
       // re-distribute the ID block in the snapshot
@@ -302,6 +363,14 @@ int main( int argc, char **argv)
 		 "%llu range failures and %llu generation failures over %llu particles\n",
 		 me, OoR, rng_Fls, gen_Flrs, myNp);
 
+       #pragma omp single
+	memset(diagnostic, 0, sizeof(num_t)*2);
+       #pragma omp barrier
+	get_howmany_in_subhaloes ( &diagnostic );
+       #pragma omp barrier
+       #pragma omp single
+	printf("***** [D] %llu in shaloes, %llu in fof %d\n", diagnostic[0], diagnostic[1], FOFDBG );
+
        #pragma omp barrier
 
 	free(IDs);
@@ -312,48 +381,52 @@ int main( int argc, char **argv)
 	  free(all_IDs);
 	}
 
-	// ------------------------------------  
-	//  create a catalog table if required;
-	//  that is a table which summarize how
-	//  many particles of each type belong
-	//  to every fof and galaxy
-	//
+	/* // ------------------------------------   */
+	/* //  create a catalog table if required; */
+	/* //  that is a table which summarize how */
+	/* //  many particles of each type belong */
+	/* //  to every fof and galaxy */
+	/* // */
 	
-	if( action & BUILD_FOF_TABLE )
-	  {	    
-	   #pragma omp master
-	    {
-	      printf("building fof table..\n");
-	      fof_table = (fof_table_t*)calloc(HowMany[0] , sizeof(fof_table_t));
-	    }
+	/* if( action & BUILD_FOF_TABLE ) */
+	/*   {	     */
+	/*    #pragma omp master */
+	/*     { */
+	/*       printf("building fof table..\n"); */
+	/*       fof_table = (fof_table_t*)calloc(HowMany[0] , sizeof(fof_table_t)); */
+	/*     } */
 	    
-	   #pragma omp barrier
+	/*    #pragma omp barrier */
 	    
-	    make_fof_table( fof_table, HowMany[0], 1 );
+	/*     make_fof_table( fof_table, HowMany[0], 1 ); */
 	    
-	   #pragma omp barrier
+	/*    #pragma omp barrier */
 	    
-	   #pragma omp single
-	    {
-	      FILE *file = fopen( catalog_table_name, "w" );
+	/*    #pragma omp single */
+	/*     { */
+	/*       FILE *file = fopen( catalog_table_name, "w" ); */
 	      
-	      for( num_t i = 0; i < HowMany[0]; i++ ) {
-		fprintf(file, "%10llu\t%lld\t%llu", i, (long long int)fof_table[i].nsubhaloes, fof_table[i].TotN );
+	/*       for( num_t i = 0; i < HowMany[0]; i++ ) { */
+	/* 	fprintf(file, "%10llu\t%lld\t%llu\t", i, (long long int)fof_table[i].nsubhaloes, fof_table[i].TotN ); */
 
-		for( int s = 0; s < fof_table[i].nsubhaloes; s++ )		  
-		  if (fof_table[i].subh_occupancy[s] == 0)
-		    printf(">>>> fof %llu has got sub-halo %u with 0 occupancy\n", i,s );
-		free( fof_table[i].subh_occupancy );
+	/* 	num_t subh_occupancy = 0; */
+	/* 	for( int s = 0; s < fof_table[i].nsubhaloes; s++ ) { */
+	/* 	  subh_occupancy += fof_table[i].subh_occupancy[s]; */
+	/* 	  if (fof_table[i].subh_occupancy[s] == 0) */
+	/* 	    printf(">>>> fof %llu has got sub-halo %u with 0 occupancy\n", i,s ); } */
+	/* 	free( fof_table[i].subh_occupancy ); */
+
+	/* 	fprintf(file, "%llu\t*\t", subh_occupancy); */
 		
-		for( int j = 0; j < NTYPES; j++ )
-		  fprintf(file, "\t%10llu", fof_table[i].Nparts[j] );
-		fprintf(file, "\n"); }	    
+	/* 	for( int j = 0; j < NTYPES; j++ ) */
+	/* 	  fprintf(file, "\t%10llu", fof_table[i].Nparts[j] ); */
+	/* 	fprintf(file, "\n"); }	     */
 	      
-	      fclose(file);
-	      free( fof_table );
-	    }
+	/*       fclose(file); */
+	/*       free( fof_table ); */
+	/*     } */
 
-	  }
+	/*   } */
 
       }
        

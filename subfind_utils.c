@@ -538,7 +538,7 @@ int distribute_particles( void )
     num_t positions[Nthreads];
 
     
-    // partition the particles in each thread
+    // partition the particles in each thread by masked PID
     // so that at the end they are divided in bunches
     // ready to be copied into other threads
     //
@@ -846,53 +846,74 @@ int distribute_ids( void )
 
 
 
+// just a diagnostic
+num_t get_howmany_in_subhaloes ( num_t *result )
+{
+  num_t myres0= 0;
+  num_t myres1 = 0;
+  for( num_t i = 0; i < myNp; i++ ) {
+    myres0 += (PPP[i].gid >= 0);
+    myres1 += (PPP[i].fofid == FOFDBG ); }
+
+ #pragma omp atomic update
+  result[0] += myres0;
+  
+ #pragma omp atomic update
+  result[1] += myres1;
+  
+  return myres0;
+}
+
+
 
 int make_fof_table( fof_table_t *table, int nfof, int mode )
 {
 
   /* as first, each threads get through its particles and
    * find the max id of subhaloes per fof
+   *
+   * NOTE: at this stage, particles are NOT in ANY particular
+   *       order
    */
 
   // find the max gid per each fof my particles belong to
   fgid_t *my_gid_maxid = (fgid_t*)calloc(nfof, sizeof(num_t));
-  for( num_t i = 0; i < myNp; i++ ) {
-    fgid_t id = PPP[i].gid+1;
-    my_gid_maxid[PPP[i].fofid] = ( my_gid_maxid[PPP[i].fofid] < id ?
-				   id : my_gid_maxid[PPP[i].fofid] );
-  }
-
-  // now reduce the maximum among all threads
-  for ( int f = 0; f < nfof; f++ )
+  for( num_t i = 0; i < myNp; i++ )
     {
-      switch( my_gid_maxid[f] ) {
-      case -1: break;
-      default: { fgid_t nsubh;
-	 #pragma omp atomic read
-	  nsubh = table[f].nsubhaloes;
-
-	  if( nsubh < my_gid_maxid[f] ) 
-	   #pragma omp critical (update_nsubhaloes)
-	    table[f].nsubhaloes = (table[f].nsubhaloes < my_gid_maxid[f] ?
-				   my_gid_maxid[f] : table[f].nsubhaloes ); }
-	break;
-      }
+      fgid_t id = PPP[i].gid+1;
+      my_gid_maxid[PPP[i].fofid] = ( my_gid_maxid[PPP[i].fofid] < id ?
+				     id : my_gid_maxid[PPP[i].fofid] );
     }
 
+ #pragma omp barrier
+  
+  // now reduce the maximum among all threads
+  for ( int f = 0; f < nfof; f++ )
+    {	
+      fgid_t nsubh;
+     #pragma omp atomic read
+      nsubh = table[f].nsubhaloes;
+      
+      if( nsubh < my_gid_maxid[f] )       
+       #pragma omp critical (update_nsubhaloes)
+	{
+	  table[f].nsubhaloes = (table[f].nsubhaloes < my_gid_maxid[f] ?
+				 my_gid_maxid[f] : table[f].nsubhaloes );
+	}
+    }     
 
   free( my_gid_maxid );
-  
+    
  #pragma omp barrier
  #pragma omp single
   {
     for ( int f = 0; f < nfof; f++ )
-      table[f].subh_occupancy = (char*)calloc( table[f].nsubhaloes, 1 );
+      table[f].subh_occupancy = (num_t*)calloc( table[f].nsubhaloes, sizeof(num_t) );
   }
 
   int         last       = -1;
-  int         last_gid   = -1;
   fof_table_t fof_record = {0};
-  fof_record.fof_id = PPP[0].fofid;
+  fof_record.fof_id      = PPP[0].fofid;
 
   for( num_t i = 0; i < myNp; i++ )
     {
@@ -901,7 +922,6 @@ int make_fof_table( fof_table_t *table, int nfof, int mode )
 	  DPRINT(1, -1, "thread %d updating halo %d\n",
 		me, fof_record.fof_id );
 	  last     = fof_record.fof_id;
-	  last_gid = -1; 
 	  
 	 #pragma omp atomic update
 	  table[fof_record.fof_id].TotN += fof_record.TotN;
@@ -921,13 +941,13 @@ int make_fof_table( fof_table_t *table, int nfof, int mode )
 	case 1: fof_record.Nparts[PPP[i].type]++; break;
 	default: fof_record.Nparts[0]++; break;
 	}
-      
-      if( (PPP[i].gid >= 0) && (last_gid != PPP[i].gid ))
-	{
-	  last_gid = PPP[i].gid;
-	 #pragma omp atomic write
-	  table[fof_record.fof_id].subh_occupancy[PPP[i].gid] = 1;
-	}
+
+      // not the best thing, it requires frequent memory access to
+      // a shared memory location
+      switch ( PPP[i].gid >= 0 ) {
+      case 1:{
+       #pragma omp atomic update
+	table[fof_record.fof_id].subh_occupancy[PPP[i].gid]++;} break; }
     }
 
   if( fof_record.fof_id != last )
@@ -937,10 +957,11 @@ int make_fof_table( fof_table_t *table, int nfof, int mode )
      #pragma omp atomic update
       table[fof_record.fof_id].TotN += fof_record.TotN;
       
-      for( int j = 0; j < NTYPES; j++) {
-       #pragma omp atomic update
-	table[fof_record.fof_id].Nparts[j] += fof_record.Nparts[j];
-	fof_record.Nparts[j] = 0; }
+      for( int j = 0; j < NTYPES; j++)
+	{
+	 #pragma omp atomic update
+	  table[fof_record.fof_id].Nparts[j] += fof_record.Nparts[j];
+	}
     }
 
   return 0;

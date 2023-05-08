@@ -69,6 +69,8 @@ char catalog_table_name[CATALOG_NAME_SIZE];
 char list_name[CATALOG_NAME_SIZE];
 char snapnum[NUM_SIZE];
 
+num_t diagnostic[2];
+
 char *list_names[MAX_N_LISTS] = {NULL};
 int   list_types[MAX_N_LISTS] = {0};
 int   Nlists = 0;

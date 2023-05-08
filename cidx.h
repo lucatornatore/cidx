@@ -34,6 +34,9 @@
 #include <mpi.h>
 #endif
 
+#define FOFDBG 9897
+
+
 #define CPU_RTIME ({_Alignas(32) struct timespec ts; double v;		\
       v=(clock_gettime( CLOCK_REALTIME, &ts ),				\
 	 (double)ts.tv_sec +						\
@@ -67,6 +70,9 @@
 #define PAPI_STOP 
 
 #endif
+
+#define EXP_FACTOR 0
+
 
 typedef unsigned int       ul_t;
 typedef unsigned long long ull_t;
@@ -115,7 +121,7 @@ typedef struct { int id_size, particle_t_size, nfiles, dummy; num_t Nparts, Npar
 
 typedef struct { int id_size, nfiles, type_is_present; num_t Nparts, Nparts_total; } list_header_t;
 
-typedef struct { int fof_id; num_t TotN, Nparts[NTYPES]; fgid_t nsubhaloes; char *subh_occupancy;} fof_table_t;
+typedef struct { int fof_id; num_t TotN, Nparts[NTYPES]; fgid_t nsubhaloes; num_t *subh_occupancy;} fof_table_t;
 
 typedef struct { list_t idx; int type; float_out pos[3], vel2, pot; } outsnap_t;
 
@@ -182,6 +188,8 @@ int   make_fof_table              ( fof_table_t*, int, int );
 int   write_fofgal_ids            ( char *, char *, int );
 int   write_fofgal_snapshots      ( char *, char *, mask_galaxies_in_fof_t *, int );
 
+int   get_snap_detail             ( FILE *, int, void * );
+
 num_t partition_P_by_pid   ( const num_t, const num_t, const PID_t);
 num_t partition_IDs_by_pid ( const num_t, const num_t, const PID_t);
 num_t partition_P_by_type  ( const num_t, const num_t, const int  );
@@ -190,6 +198,7 @@ num_t partition_P_by_file  ( const num_t, const num_t, const int  );
 int k_way_partition        ( const num_t, const num_t, const int, const int,
 			     const num_t *, num_t *restrict, int );
 
+num_t get_howmany_in_subhaloes ( num_t * );
 
 int write_particles( FILE *, int );
 
@@ -280,6 +289,8 @@ typedef struct {
   char       example[ARG_EX_SIZE];
   int        family;
   action_t   action; } arg_t;
+
+extern num_t diagnostic[2];
 
 extern int   action;
 extern int   help_given;
