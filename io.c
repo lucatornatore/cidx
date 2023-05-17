@@ -61,13 +61,9 @@ int get_stellargenerations( PID_t id, PID_t mask, int bitshift )
 
 PID_t get_unmasked_pid( PID_t masked_pid, int n_gen, int bitshift )
 {
- #if !defined(LONG_IDS)
- #define BASE 32
- #else
- #define BASE 64
- #endif
+ #define SHIFT_BASE (BASE-1)
   
-  PID_t mask = n_gen << (BASE-bitshift);
+  PID_t mask = n_gen << (SHIFT_BASE-bitshift);
   return masked_pid | mask;
 }
 
@@ -554,11 +550,12 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
 	      free(buffer); free(P[0]); _failures_++; }
 	    
 	    else {
+	      int save_ret = ret;
 	      ret = (size_t)((num_t)ret / files[fn].npart);
 	      if ( ret != sizeof(PID_t) ) {                                               // check that the ID type lenght matches
 		printf("thread %d: ID block in subfind file %d "
-		       "has %lu-bytes long data while my ID type has %lu bytes\n",
-		       me, fn, ret, sizeof(PID_t) ); ret = 0; _failures_++; }
+		       "has %lu-bytes long data while my ID type has %lu bytes (%d %llu)\n",
+		       me, fn, ret, sizeof(PID_t), save_ret, files[fn].npart ); ret = 0; _failures_++; }
 
 	      if ( in_file_off > 0 )                                                      // skip initial data if needed
 		{
@@ -840,17 +837,17 @@ int get_id_data(char *working_dir, char *name)
 
 	    omp_set_lock( &files[fn].lock );
 	
-	    ret = seek_block(files[fn].ptr, "ID  ");
-	    if ( ret )
+	    size_t  myret = seek_block(files[fn].ptr, "ID  ");
+	    if ( myret )
 	      {
-		ret = (size_t)((num_t)ret / files[fn].npart_all);
-		if ( ret != sizeof(PID_t) ) {
+		myret = (size_t)((num_t)myret / files[fn].npart_all);
+		if ( myret != sizeof(PID_t) ) {
 		  printf("thread %d: ID block in snap file %d has %lu-bytes long data while my ID type has %lu bytes\n",
-			 me, fn, ret, sizeof(PID_t) ); ret = 0; }
+			 me, fn, ret, sizeof(PID_t) ); myret = 0; }
 	      }
-	    if ( ret )
+	    if ( myret )
 	      {
-		ret = fseeko(files[fn].ptr, (off_t)(sizeof(PID_t)*file_start_offset), SEEK_CUR);
+		myret = fseeko(files[fn].ptr, (off_t)(sizeof(PID_t)*file_start_offset), SEEK_CUR);
 		fread(buffer, sizeof(PID_t), howmany_toread, files[fn].ptr);
 
 		for ( num_t i = 0; i < howmany_toread; read++, i++ )
@@ -1670,8 +1667,37 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
   
  #pragma omp parallel reduction(+:snapout_sizes[0:nmasks])
   {
-
     // [ 2 ]
+    //
+    // partition particles by the file they belong to
+    //
+    
+    int nfiles = check_number_of_files(wdir, snapname);
+
+    num_t *fpositions = (num_t*)calloc( nfiles, sizeof(num_t) );
+    memset(fpositions, 0, sizeof(num_t)*nfiles);
+    file_positions[me] = fpositions;
+
+    num_t franges[nfiles];
+    for( int n = 0; n < nfiles; n++ )
+      franges[n] = n;
+    
+    k_way_partition(0, myNp, 0, nfiles-2, franges, fpositions, 3);
+
+   #if defined(DEBUG)
+    {
+      num_t fails = 0;
+      for( num_t i = 1; i < myNp; i++ )
+	fails += (PPP[i].file < PPP[i-1].file);
+
+      if( fails > 0 )
+	printf("\t[thread %d] has %llu errors in by-file partitioning\n",
+	       me, fails );
+    }
+   #endif
+
+
+    // [ 3 ]
     // allocate room for particle structures to be written
     // in the files at each thread
     //
@@ -1702,6 +1728,10 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 
     outsnap_data = (outsnap_t*)malloc( masked_parts[ALL] * sizeof(outsnap_t) );
 
+    // [ 4 ]
+    //
+    // fill some info for every particle
+    
     num_t p = 0;
     for ( num_t i = 0; i < myNp; i++ )
       {
@@ -1716,38 +1746,12 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	  outsnap_data[p].idx.gid   = PPP[i].gid;
 	  outsnap_data[p].type      = PPP[i].type; p++; } break; }
       }
-    //printf("\t[thread %d] %llu particles masked\n", me, (unsigned long long)p);  // just for debug
+    printf("\t[thread %d] %llu particles masked\n", me, (unsigned long long)p);  // just for debug
 
-    // partition particles by the file they belong to
-
-    
-    int nfiles = check_number_of_files(wdir, snapname);
-
-    num_t *fpositions = (num_t*)calloc( nfiles, sizeof(num_t) );
-    memset(fpositions, 0, sizeof(num_t)*nfiles);
-    file_positions[me] = fpositions;
-
-    num_t franges[nfiles];
-    for( int n = 0; n < nfiles; n++ )
-      franges[n] = n;
-    
-    k_way_partition(0, myNp, 0, nfiles-2, franges, fpositions, 3);
-
-   #if defined(DEBUG)
-    {
-      num_t fails = 0;
-      for( num_t i = 1; i < myNp; i++ )
-	fails += (PPP[i].file < PPP[i-1].file);
-
-      if( fails > 0 )
-	printf("\t[thread %d] has %llu errors in by-file partitioning\n",
-	       me, fails );
-    }
-   #endif
     
     }
   
-  // [ 3 ]
+  // [ 5 ]
   // allocate buffer for storing blocks from snapshot files
   //
   // here we should parse the required blocks
@@ -1770,18 +1774,20 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
   int max_data_multiplicity = 3;  
   int max_size_per_particle = max_data_multiplicity*sizeof_out_data; 
   
-  // [ 4 ]
+  // [ 6 ]
   // loops over snapshot files and get particles
     
   double  exp_factor;
   int     nfiles;
   char   *fname = (char*)malloc( strlen(wdir) + strlen(snapname) + 10 );  
   nfiles        = check_number_of_files(wdir, snapname);
+
+  num_t   progress[Nthreads];
+  memset( progress, 0, sizeof(num_t)*Nthreads );
   
   for ( int f = 0; f < nfiles; f++ )
     {
-      FILE  *filein;
-      
+      FILE  *filein;      
       
       if ( nfiles > 1 )
 	sprintf( fname, "%s/%s.0", wdir, snapname );
@@ -1804,12 +1810,13 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	  
      #pragma omp parallel
       {
-	char *_pmasked_ = p_is_masked[me];
-	num_t i = (f == 0 ? 0 : file_positions[me][f-1]);
+	char  *_pmasked_ = p_is_masked[me];
+	num_t  p         = progress[me];
+	num_t  i         = (f == 0 ? 0 : file_positions[me][f-1]);
 
 	float_out halfbox = (float_out)snapheader.BoxSize / 2.0;
-
-	for( num_t p = 0; (i < myNp) && (PPP[i].file==f); i++ )
+	
+	for( ; (i < myNp) && (PPP[i].file==f); i++ )
 	  {
 	    int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
 	    switch( is_masked )
@@ -1826,19 +1833,18 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 		  p++; } break;
 	      default: break;
 	      }
-
-	    
 	  }
+	dprint(2,-1, "\t\tth %d has got %llu masked particles from file %d\n", me, p-progress[me], f);
       }
 
       get_block_from_file( "VEL ", filein, (void*)block );
       
      #pragma omp parallel
       {
-	char *_pmasked_ = p_is_masked[me];
-	num_t i = (f == 0 ? 0 : file_positions[me][f-1]);
-	
-	for( num_t p = 0; (i < myNp) && (PPP[i].file==f); i++ )
+	char  *_pmasked_ = p_is_masked[me];
+	num_t  i         = (f == 0 ? 0 : file_positions[me][f-1]);
+	num_t  p         = progress[me];
+	for( ; (i < myNp) && (PPP[i].file==f); i++ )
 	  {
 	    int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
 	    switch( is_masked )
@@ -1872,7 +1878,8 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	  }
 	
 	num_t i = (f == 0 ? 0 : file_positions[me][f-1]);
-	for( num_t p = 0; (i < myNp) && (PPP[i].file==f); i++ )
+	num_t p = progress[me];
+	for( ; (i < myNp) && (PPP[i].file==f); i++ )
 	  {
 	    int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
 	    double mass = masstable[PPP[i].type];
@@ -1901,9 +1908,10 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
       
      #pragma omp parallel
       {
-	char *_pmasked_ = p_is_masked[me];
-	num_t i = (f == 0 ? 0 : file_positions[me][f-1]);
-	for( num_t p = 0; (i < myNp) && (PPP[i].file==f); i++ )
+	char  *_pmasked_ = p_is_masked[me];
+	num_t  i         = (f == 0 ? 0 : file_positions[me][f-1]);
+	num_t  p         = progress[me];
+	for( ; (i < myNp) && (PPP[i].file==f); i++ )
 	  {
 	    int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
 	    switch( is_masked )
@@ -1917,6 +1925,13 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	      default: break;
 	      }
 	  }
+
+	/* -----------------------
+	 *
+	 * This is the last block
+	 * ==>> UPDATE progress[me]
+	 * ----------------------- */
+	progress[me] += (p-progress[me]);
       }
 
       free(block);
@@ -1928,8 +1943,8 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
   for( int f = 0; f < nmasks; f++ )
     {
       int size;
-      printf("\twriting %llu particles in mask file %d\n",
-	     (unsigned long long)snapout_sizes[f], f );
+      printf("\twriting %llu particles in mask file %d, with %lu bytes per particle\n",
+	     (unsigned long long)snapout_sizes[f], f, sizeof(outsnap_t));
 
       
       // write how many particles will be in the file
@@ -1944,10 +1959,6 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
       fwrite( &size, sizeof(int), 1, FofGalFiles[f] );
     }
 
-
-  FILE *idfile = NULL;
-  /* idfile = fopen("ids_file.dat", "w"); */
-  /* fwrite( &snapout_sizes[0], sizeof(num_t), 1, FofGalFiles[f] ); */
   
   #pragma omp parallel
   {
@@ -1956,7 +1967,10 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
    #pragma omp for ordered
     for( int t = 0; t < Nthreads; t++ )
       {
-	for( num_t i = 0, p = 0; i < myNp; i++ ) {
+	num_t p = 0;
+	num_t w = 0;
+	num_t uw = 0;
+	for( num_t i = 0; i < myNp; i++ ) {
 	  int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);	  
 	  switch( is_masked ) {
 	  case 1: {
@@ -1965,12 +1979,11 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 		int s = ( (PPP[i].fofid == masks[m].fof_num) &&
 			  ((PPP[i].gid == masks[m].ngal) ||
 			   (masks[m].ngal == -1)) );
-
 		switch( s != 0 ) {
-		case 1: fwrite( &outsnap_data[p], sizeof(outsnap_t), 1, FofGalFiles[m] ); break; }
-	      } } break; }
-	  p+= is_masked;
+		case 1: {fwrite( &outsnap_data[p], sizeof(outsnap_t), 1, FofGalFiles[m] ); w++;} break; }
+	      } p++; } break; }
 	}
+	dprint(2,-1, "\t\t thread %d has found %llu masked particles and written %llu\n", me, p, w );
       }
     
     free( p_is_masked[me] );

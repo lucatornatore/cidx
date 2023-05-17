@@ -13,7 +13,7 @@ int main( int argc, char **argv)
    
  #if defined(USE_MPI)
   {
-    #error "MPI support not yet implemented"
+   #error "MPI support not yet implemented"
     int mpi_provided_thread_level;
     MPI_Init_threads( &argc, &argv, MPI_THREAD_FUNNELED, &mpi_provided_thread_level);
     if ( mpi_provided_thread_level < MPI_THREAD_FUNNELED )
@@ -34,9 +34,13 @@ int main( int argc, char **argv)
     {
       Nthreads = omp_get_num_threads();
       printf("using %d threads\n", Nthreads);
-    }
-    
+    }    
   }
+
+ #if defined(DEBUG)
+ #pragma omp single
+  printf(">> you're running a version with DEBUG code\n");
+ #endif
 
 
   // ------------------------------------
@@ -175,9 +179,9 @@ int main( int argc, char **argv)
 
       memset(diagnostic, 0, sizeof(num_t)*2);
      #pragma omp parallel
-      get_howmany_in_subhaloes ( &diagnostic );
+      get_howmany_in_subhaloes ( &diagnostic[0] );
 
-      printf("***** [D] %llu in shaloes, %llu in fof %d\n", diagnostic[0], diagnostic[1], FOFDBG );
+      //      printf("***** [D] %llu in shaloes, %llu in fof %d\n", diagnostic[0], diagnostic[1], FOFDBG );
 
 
       // ------------------------------------  
@@ -223,7 +227,7 @@ int main( int argc, char **argv)
       
       if ( !( (action & CREATE_CATALOGS ) ||
 	      ( action & WRITE_MASK_FILES ) ) )
-	return;
+	return 0;
 
       
       /* if( action & WRITE_MASK_FILES ) */
@@ -366,12 +370,10 @@ int main( int argc, char **argv)
        #pragma omp single
 	memset(diagnostic, 0, sizeof(num_t)*2);
        #pragma omp barrier
-	get_howmany_in_subhaloes ( &diagnostic );
+	get_howmany_in_subhaloes ( &diagnostic[0] );
        #pragma omp barrier
-       #pragma omp single
-	printf("***** [D] %llu in shaloes, %llu in fof %d\n", diagnostic[0], diagnostic[1], FOFDBG );
-
-       #pragma omp barrier
+	//#pragma omp single
+	//printf("***** [D] %llu in shaloes, %llu in fof %d\n", diagnostic[0], diagnostic[1], FOFDBG );
 
 	free(IDs);
        #pragma omp single
@@ -380,53 +382,6 @@ int main( int argc, char **argv)
 	  free(all_NID);
 	  free(all_IDs);
 	}
-
-	/* // ------------------------------------   */
-	/* //  create a catalog table if required; */
-	/* //  that is a table which summarize how */
-	/* //  many particles of each type belong */
-	/* //  to every fof and galaxy */
-	/* // */
-	
-	/* if( action & BUILD_FOF_TABLE ) */
-	/*   {	     */
-	/*    #pragma omp master */
-	/*     { */
-	/*       printf("building fof table..\n"); */
-	/*       fof_table = (fof_table_t*)calloc(HowMany[0] , sizeof(fof_table_t)); */
-	/*     } */
-	    
-	/*    #pragma omp barrier */
-	    
-	/*     make_fof_table( fof_table, HowMany[0], 1 ); */
-	    
-	/*    #pragma omp barrier */
-	    
-	/*    #pragma omp single */
-	/*     { */
-	/*       FILE *file = fopen( catalog_table_name, "w" ); */
-	      
-	/*       for( num_t i = 0; i < HowMany[0]; i++ ) { */
-	/* 	fprintf(file, "%10llu\t%lld\t%llu\t", i, (long long int)fof_table[i].nsubhaloes, fof_table[i].TotN ); */
-
-	/* 	num_t subh_occupancy = 0; */
-	/* 	for( int s = 0; s < fof_table[i].nsubhaloes; s++ ) { */
-	/* 	  subh_occupancy += fof_table[i].subh_occupancy[s]; */
-	/* 	  if (fof_table[i].subh_occupancy[s] == 0) */
-	/* 	    printf(">>>> fof %llu has got sub-halo %u with 0 occupancy\n", i,s ); } */
-	/* 	free( fof_table[i].subh_occupancy ); */
-
-	/* 	fprintf(file, "%llu\t*\t", subh_occupancy); */
-		
-	/* 	for( int j = 0; j < NTYPES; j++ ) */
-	/* 	  fprintf(file, "\t%10llu", fof_table[i].Nparts[j] ); */
-	/* 	fprintf(file, "\n"); }	     */
-	      
-	/*       fclose(file); */
-	/*       free( fof_table ); */
-	/*     } */
-
-	/*   } */
 
       }
        
