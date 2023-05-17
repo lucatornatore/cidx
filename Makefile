@@ -6,7 +6,9 @@ $(info ${arch} architecture found)
 ifeq ($(arch),ppc64le)
 	myCC=xlc
 else 
-	myCC=gcc
+	#myCC=gcc-12
+	#myCC=clang-16
+	myCC=icx
 endif
 
 CC=$(myCC)
@@ -33,6 +35,7 @@ OPT=
 ifeq ($(LONG_IDS),on)
 $(info using 8bytes ids)
 OPT += -DLONG_IDS
+NAME_EXT :=.longids
 else
 $(info using 4bytes ids)
 endif
@@ -46,7 +49,13 @@ endif
 
 
 ifeq ($(CC),gcc)
-	OPENMP = -fopenmp 
+	OPENMP = -fopenmp
+else ifeq ($(CC),gcc-12)
+	OPENMP = -fopenmp
+else ifeq ($(CC),clang-16)
+	OPENMP = -fopenmp
+else ifeq ($(CC),icx)
+	OPENMP = -qopenmp
 else ifeq ($(CC),xlc)
 	OPENMP = -qsmp=omp
 endif
@@ -67,18 +76,27 @@ ifeq ($(PRODUCTION),on)
 $(info compiling for production)
 	ifeq ($(CC),gcc)
 	OPTIMIZE_FLAGS = -O4 -march=native -faggressive-loop-optimizations
+	else ifeq ($(CC),gcc-12)
+	OPTIMIZE_FLAGS = -O4 -march=native -faggressive-loop-optimizations
+	else ifeq ($(CC),clang-16)
+	OPTIMIZE_FLAGS = -O3 -march=native
+	else ifeq ($(CC),icx)
+	OPTIMIZE_FLAGS = -Ofast -fbuiltin -foptimize-sibling-calls -axskylake -march=skylake
 	else ifeq ($(CC),xlc)
 	OPTIMIZE_FLAGS = -O5 -qnostrict -qarch=auto -qtune=auto -qhot
 	endif
 	CFLAGS = $(DBG_INFO) $(OPTIMIZE_FLAGS) -fno-stack-protector $(COMMON_CFLAGS) $(SANITIZE_FLAGS)
-	CIDX = $(EXEC_NAME)
 else
 $(info internal debugging checks on)
 	OPT += -DDEBUG
-$(info compiling with debugging symbols)
-	CIDX = $(EXEC_NAME)_g
-	CFLAGS = -O2 -ggdb3 $(SANITIZE_FLAGS) $(COMMON_CFLAGS)
+$(info compiling with debugging symbols)	
+	NAME_EXT := $(NAME_EXT)_g
+	CFLAGS = -O0 -ggdb3 $(SANITIZE_FLAGS) $(COMMON_CFLAGS)
 endif
+
+# ------------------------------------ executable name
+
+CIDX = $(EXEC_NAME)$(NAME_EXT)
 
 # ------------------------------------ define dependence files for each target
 OBJS   = cidx_vars.o cidx.o io.o sort_and_search.o subfind_utils.o
