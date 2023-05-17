@@ -496,7 +496,7 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
     
     particles_off = myoff;
 
-    dprint(2,me, "[sf data] thread %d is getting %llu particles, "
+    dprint(2,me, "\t[sf data] thread %d is getting %llu particles, "
 	   "starting from halo %lld off %llu , shalo %lld off %llu\n",
 	   me, myNp, fofn, in_fof_off, hn, halo_read);
 
@@ -1657,10 +1657,17 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
       free( FofGalFiles );
       return -1;
     }
+
+  int nfiles = check_number_of_files(wdir, snapname);
   
   char  *p_is_masked[Nthreads];
   num_t *file_positions[Nthreads];
   num_t *snapout_sizes = calloc(nmasks, sizeof(num_t));
+
+  nparts_t masked_parts[Nthreads];
+  num_t    masked_in_file[Nthreads][nfiles];
+  memset( masked_parts, 0, sizeof(nparts_t)*Nthreads );
+  memset( masked_in_file, 0, sizeof(num_t)*Nthreads*nfiles );
   
  #define p_idx(i) ((i)/8)
  #define p_bytemask(i,s) (char)((s) << (i%8))
@@ -1671,8 +1678,6 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
     //
     // partition particles by the file they belong to
     //
-    
-    int nfiles = check_number_of_files(wdir, snapname);
 
     num_t *fpositions = (num_t*)calloc( nfiles, sizeof(num_t) );
     memset(fpositions, 0, sizeof(num_t)*nfiles);
@@ -1707,7 +1712,10 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
     char *_pmasked_ = (char*)calloc( (myNp/8+1), 1);
     p_is_masked[me] = _pmasked_;
     
-    nparts_t masked_parts = {0};
+    nparts_t _masked_parts_ = {0};
+    num_t    _masked_in_file_[nfiles];
+    memset( _masked_in_file_, 0, sizeof(num_t)*nfiles );
+    
     for ( num_t i = 0; i < myNp; i++ )
       {
 	int first = 1;
@@ -1719,14 +1727,16 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	    snapout_sizes[m]          += s;
 	    
 	    if( s && first ) {
-	      masked_parts[PPP[i].type] += s;
-	      masked_parts[ALL]         += s;	    	  
-	      _pmasked_[p_idx(i)] |= p_bytemask(i,s);
+	      _masked_parts_[PPP[i].type] += s;
+	      _masked_parts_[ALL]         += s;	    	  
+	      _pmasked_[p_idx(i)]         |= p_bytemask(i,s);
 	      first = 0; }
 	  }
       }
-
-    outsnap_data = (outsnap_t*)malloc( masked_parts[ALL] * sizeof(outsnap_t) );
+    
+    outsnap_data = (outsnap_t*)malloc( _masked_parts_[ALL] * sizeof(outsnap_t) );
+    for ( int i = 0; i <= ALL; i++ )
+      masked_parts[me][i] = _masked_parts_[i];
 
     // [ 4 ]
     //
@@ -1739,6 +1749,7 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	switch(is_masked) {
 	case 1: {
 	  PID_t pid = PPP[i].pid;
+	  _masked_in_file_[PPP[i].file]++;
 	  switch( PPP[i].gen > 0 ) {
 	  case 1: pid = get_unmasked_pid( pid, PPP[i].gen, id_bitshift ); break; }
 	  outsnap_data[p].idx.pid   = pid;
@@ -1746,7 +1757,18 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	  outsnap_data[p].idx.gid   = PPP[i].gid;
 	  outsnap_data[p].type      = PPP[i].type; p++; } break; }
       }
-    printf("\t[thread %d] %llu particles masked\n", me, (unsigned long long)p);  // just for debug
+
+    for ( int i = 0; i <= nfiles; i++ )
+      masked_in_file[me][i] = _masked_in_file_[i];
+
+   #if defined(DEBUG)
+    if ( p != _masked_parts_[ALL] )
+      printf(">>>>>> W AR N I N G <<<<<<< thread %d : mismatch in masked parts: "
+	     "found %llu instead of %llu (line %d of file %s)",
+	     me, p, _masked_parts_[ALL], __LINE__, __FILE__ );
+   #endif
+      
+    dprint(0, -1, "\t[thread %d] %llu particles masked\n", me, (unsigned long long)p);  // just for debug
 
     
     }
@@ -1778,9 +1800,7 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
   // loops over snapshot files and get particles
     
   double  exp_factor;
-  int     nfiles;
   char   *fname = (char*)malloc( strlen(wdir) + strlen(snapname) + 10 );  
-  nfiles        = check_number_of_files(wdir, snapname);
 
   num_t   progress[Nthreads];
   memset( progress, 0, sizeof(num_t)*Nthreads );
@@ -1810,53 +1830,59 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	  
      #pragma omp parallel
       {
-	char  *_pmasked_ = p_is_masked[me];
-	num_t  p         = progress[me];
-	num_t  i         = (f == 0 ? 0 : file_positions[me][f-1]);
-
-	float_out halfbox = (float_out)snapheader.BoxSize / 2.0;
-	
-	for( ; (i < myNp) && (PPP[i].file==f); i++ )
-	  {
-	    int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
-	    switch( is_masked )
+	if ( masked_in_file[me][f] > 0 )
+	  {	
+	    char  *_pmasked_ = p_is_masked[me];
+	    num_t  p         = progress[me];
+	    num_t  i         = (f == 0 ? 0 : file_positions[me][f-1]);
+	    
+	    float_out halfbox = (float_out)snapheader.BoxSize / 2.0;
+	    
+	    for( ; (i < myNp) && (PPP[i].file==f); i++ )
 	      {
-	      case 1: { switch( sizeof_in_data == sizeof(float) ) {
-		  case 0: { for( int j = 0; j < 3 ; j++ )
-			outsnap_data[p].pos[j] = (float_out)*((double*)block + PPP[i].pos*3 + j); } break;
-		  case 1: { for( int j = 0; j < 3 ; j++ )
-			outsnap_data[p].pos[j] = (float_out)*((float*)block + PPP[i].pos*3 + j); } break; }
-
-		  switch( shiftbox ) {
-		  case 1: { for( int j = 0; j < 3 ; j++ ) outsnap_data[p].pos[j] -= halfbox; } break; }
-
-		  p++; } break;
-	      default: break;
+		int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
+		switch( is_masked )
+		  {
+		  case 1: { switch( sizeof_in_data == sizeof(float) ) {
+		      case 0: { for( int j = 0; j < 3 ; j++ )
+			    outsnap_data[p].pos[j] = (float_out)*((double*)block + PPP[i].pos*3 + j); } break;
+		      case 1: { for( int j = 0; j < 3 ; j++ )
+			    outsnap_data[p].pos[j] = (float_out)*((float*)block + PPP[i].pos*3 + j); } break; }
+		      
+		      switch( shiftbox ) {
+		      case 1: { for( int j = 0; j < 3 ; j++ ) outsnap_data[p].pos[j] -= halfbox; } break; }
+		      
+		      p++; } break;
+		  default: break;
+		  }
 	      }
-	  }
-	dprint(2,-1, "\t\tth %d has got %llu masked particles from file %d\n", me, p-progress[me], f);
+	    dprint(2,-1, "\t\tth %d has got %llu masked particles from file %d\n", me, p-progress[me], f);
+	  }	
       }
 
       get_block_from_file( "VEL ", filein, (void*)block );
       
      #pragma omp parallel
       {
-	char  *_pmasked_ = p_is_masked[me];
-	num_t  i         = (f == 0 ? 0 : file_positions[me][f-1]);
-	num_t  p         = progress[me];
-	for( ; (i < myNp) && (PPP[i].file==f); i++ )
-	  {
-	    int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
-	    switch( is_masked )
+	if ( masked_in_file[me][f] > 0 )
+	  {		    
+	    char  *_pmasked_ = p_is_masked[me];
+	    num_t  i         = (f == 0 ? 0 : file_positions[me][f-1]);
+	    num_t  p         = progress[me];
+	    for( ; (i < myNp) && (PPP[i].file==f); i++ )
 	      {
-	      case 1: { double v2 = 0;
-		  if( sizeof_in_data == sizeof(float) ) {
-		    for( int j = 0; j < 3 ; j++ )
-		      v2 += *((float*)block + PPP[i].pos*3 + j)* *((float*)block + PPP[i].pos*3 + j) * exp_factor; }
-		  else { for( int j = 0; j < 3 ; j++ )
-		      v2 += *((double*)block + PPP[i].pos*3 + j)* *((double*)block + PPP[i].pos*3 + j) * exp_factor; }
-		  outsnap_data[p].vel2 = v2; p++; }
-	      default: break;
+		int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
+		switch( is_masked )
+		  {
+		  case 1: { double v2 = 0;
+		      if( sizeof_in_data == sizeof(float) ) {
+			for( int j = 0; j < 3 ; j++ )
+			  v2 += *((float*)block + PPP[i].pos*3 + j)* *((float*)block + PPP[i].pos*3 + j) * exp_factor; }
+		      else { for( int j = 0; j < 3 ; j++ )
+			  v2 += *((double*)block + PPP[i].pos*3 + j)* *((double*)block + PPP[i].pos*3 + j) * exp_factor; }
+		      outsnap_data[p].vel2 = v2; p++; }
+		  default: break;
+		  }
 	      }
 	  }
       }
@@ -1866,40 +1892,43 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
       
      #pragma omp parallel
       {
-	char *_pmasked_ = p_is_masked[me];
-	double masstable[NTYPES];
-	memcpy( masstable, snapheader.mass, sizeof(double)*NTYPES );
+	if ( masked_in_file[me][f] > 0 )
+	  {		    
+	    char *_pmasked_ = p_is_masked[me];
+	    double masstable[NTYPES];
+	    memcpy( masstable, snapheader.mass, sizeof(double)*NTYPES );
 
-	num_t offset[NTYPES] = {0};
-	for( int t = 1; t < NTYPES; t++ )
-	  {
-	    for ( int j = 0; j < t; j++ )
-	      offset[t] += nparts[j]*(masstable[j]>0);
-	  }
-	
-	num_t i = (f == 0 ? 0 : file_positions[me][f-1]);
-	num_t p = progress[me];
-	for( ; (i < myNp) && (PPP[i].file==f); i++ )
-	  {
-	    int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
-	    double mass = masstable[PPP[i].type];
-	    switch( is_masked )
+	    num_t offset[NTYPES] = {0};
+	    for( int t = 1; t < NTYPES; t++ )
 	      {
-	      case 1: {
-		switch( mass == 0 )
+		for ( int j = 0; j < t; j++ )
+		  offset[t] += nparts[j]*(masstable[j]>0);
+	      }
+	
+	    num_t i = (f == 0 ? 0 : file_positions[me][f-1]);
+	    num_t p = progress[me];
+	    for( ; (i < myNp) && (PPP[i].file==f); i++ )
+	      {
+		int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
+		double mass = masstable[PPP[i].type];
+		switch( is_masked )
 		  {
-		  case 1: {		    
-		    num_t n = PPP[i].pos - offset[PPP[i].type];
-		    if( sizeof_in_data == sizeof(float) )
-		      mass = *((float*)block + n);
-		    else 
-		      mass = *((double*)block + n);
-		  } break;
+		  case 1: {
+		    switch( mass == 0 )
+		      {
+		      case 1: {		    
+			num_t n = PPP[i].pos - offset[PPP[i].type];
+			if( sizeof_in_data == sizeof(float) )
+			  mass = *((float*)block + n);
+			else 
+			  mass = *((double*)block + n);
+		      } break;
+		      default: break;
+		      }
+		    outsnap_data[p].vel2 *= mass; p++;
+		  }
 		  default: break;
 		  }
-		outsnap_data[p].vel2 *= mass; p++;
-	      }
-	      default: break;
 	      }
 	  }
       }
@@ -1908,30 +1937,33 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
       
      #pragma omp parallel
       {
-	char  *_pmasked_ = p_is_masked[me];
-	num_t  i         = (f == 0 ? 0 : file_positions[me][f-1]);
-	num_t  p         = progress[me];
-	for( ; (i < myNp) && (PPP[i].file==f); i++ )
-	  {
-	    int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
-	    switch( is_masked )
+	if ( masked_in_file[me][f] > 0 )
+	  {		    	    
+	    char  *_pmasked_ = p_is_masked[me];
+	    num_t  i         = (f == 0 ? 0 : file_positions[me][f-1]);
+	    num_t  p         = progress[me];
+	    for( ; (i < myNp) && (PPP[i].file==f); i++ )
 	      {
-	      case 1: { double pot = 0;
-		  if( sizeof_in_data == sizeof(float) )
-		    pot = (double)*((float*)block + PPP[i].pos);
-		  else 
-		    pot = *((double*)block + PPP[i].pos);
-		  outsnap_data[p].pot = pot; p++; }
-	      default: break;
+		int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);
+		switch( is_masked )
+		  {
+		  case 1: { double pot = 0;
+		      if( sizeof_in_data == sizeof(float) )
+			pot = (double)*((float*)block + PPP[i].pos);
+		      else 
+			pot = *((double*)block + PPP[i].pos);
+		      outsnap_data[p].pot = pot; p++; }
+		  default: break;
+		  }
 	      }
-	  }
 
-	/* -----------------------
-	 *
-	 * This is the last block
-	 * ==>> UPDATE progress[me]
-	 * ----------------------- */
-	progress[me] += (p-progress[me]);
+	    /* -----------------------
+	     *
+	     * This is the last block
+	     * ==>> UPDATE progress[me]
+	     * ----------------------- */
+	    progress[me] += (p-progress[me]);
+	  }
       }
 
       free(block);
