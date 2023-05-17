@@ -17,6 +17,12 @@
  */
 
 
+// these 2 defines are used to invoke get_particles_num()
+//
+#define FILE_PARTICLES 0
+#define ALL_PARTICLES  1
+
+
 /*  -------------------------------------------------------------
  * 
  *   routines for id masking
@@ -234,14 +240,17 @@ int get_particles_num( FILE *file, nparts_t *nparts, int mode )
   ret = fread( &header, sizeof(snapheader_t), 1, file);
   
   (*nparts)[ALL] = 0;
-  
-  if( mode )         // get the total number of particles
-    for( int i = 0; i < NTYPES; i++ )
-      (*nparts)[ALL] += ((*nparts)[i] = (header.npartTotalHighWord[i]<<31) + header.npartTotal[i]);
 
-  else               // get the snapshot's number of particles    
+  switch( mode )
+    {
+    case  ALL_PARTICLES: {       // get the total number of particles
+      for( int i = 0; i < NTYPES; i++ )
+	(*nparts)[ALL] += ((*nparts)[i] =
+			   (header.npartTotalHighWord[i]<<31) + header.npartTotal[i]); } break;
+    case FILE_PARTICLES: {      // get the snapshot's number of particles    
     for( int i = 0; i < NTYPES; i++ )
-      (*nparts)[ALL] += ((*nparts)[i] = header.npart[i]);
+      (*nparts)[ALL] += ((*nparts)[i] = header.npart[i]); } break;
+    }
 
   return header.num_files;
 }
@@ -297,14 +306,14 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
     //   type 1: Sub Haloes
     //   type 2: how many particles in Fof haloes
     
-    int numfiles = get_particles_num( filein, &nparts, 1 );
+    int numfiles = get_particles_num( filein, &nparts, ALL_PARTICLES );
     for( int i = 0; i < 3; i++ )
       HowMany[i] = nparts[i];
     
     if( numfiles != nfiles )
       {
 	fclose(filein);
-	printf("[sf data] the number of files specified in the header (%d) "
+	printf("\t[sf data] the number of files specified in the header (%d) "
 	       "is different than the number of files found (%d)\n",
 	       numfiles, nfiles );
 	return -3;
@@ -346,7 +355,7 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
       else
 	sprintf( fname, "%s/%s", working_dir, subf_base );
       
-      DPRINT(2,-1, "[sf data] opening file %d: %s\n", go, fname);
+      DPRINT(2,-1, "\t[sf data] opening file %d: %s\n", go, fname);
       
       files[go].ptr  = fopen( fname, "r" );
       omp_init_lock(&files[go].lock);
@@ -428,7 +437,7 @@ int get_subfind_data(char *working_dir, char *subf_base, num_t HowMany[4] )
   //
   Np = HowMany[FofP];
   
-  printf("[sf data] %llu total particles belong to %llu sub-haloes\n", HowMany[SubHP], HowMany[SubH]);
+  printf("\t[sf data] %llu total particles belong to %llu sub-haloes\n", HowMany[SubHP], HowMany[SubH]);
   
   int failures = 0;
   #pragma omp parallel
@@ -730,7 +739,7 @@ int get_id_data(char *working_dir, char *name)
       sprintf( fname, "%s/%s", working_dir, name );
     filein = fopen( fname, "r" );
 
-    int numfiles = get_particles_num( filein, &nparts, 1 );
+    int numfiles = get_particles_num( filein, &nparts, ALL_PARTICLES );
     AllN = nparts[ALL];
     
     if( numfiles != nfiles )
@@ -801,10 +810,11 @@ int get_id_data(char *working_dir, char *name)
     int   file_start        = 0;
     num_t file_start_offset = 0;
 
-    // determine the first file and the offset from which to start
+    // determine the first file of interest for this thread
     //
     while( (file_start < nfiles) && (myoff >= files[file_start].npart_all_inc) )
       file_start++;
+    // find the offset in this file
     file_start_offset = myoff - (files[file_start].npart_all_inc - files[file_start].npart_all);
 
     if( file_start < nfiles )
@@ -818,25 +828,37 @@ int get_id_data(char *working_dir, char *name)
 	  // data have not been loaded
 	  // 
 	  {
-	    num_t npart_local_inc[NTYPES] = {0};
+	    num_t npart_local_inc[NTYPES] = {0};  // this array stores the incremental nr. of
+						  // particles in this file, by their type
 	    num_t howmany_toread = 0;
 	    int   type = 0;
-		
+
+	                                          // calculate the incremental number of
+	                                          // particles of each type
 	    npart_local_inc[0] = files[fn].npart[0];
 	    for( int i = 1; i < NTYPES; i++ )
 	      npart_local_inc[i] = files[fn].npart[i] + npart_local_inc[i-1];
-	
+
+	                                          // find the type of the first particle
 	    while( file_start_offset >= npart_local_inc[type] )
 	      type++;
+	                                          // find how many particles must be
+	                                          // read
+	    
+	    howmany_toread = myNID - read;        // these are all the particles that remains
 
-	    howmany_toread = myNID - read;
+						  // check whether there are less particles 
+						  // available in the current file	    
 	    howmany_toread = (howmany_toread > files[fn].npart_all - file_start_offset ?
 			      files[fn].npart_all - file_start_offset : howmany_toread);
-	    
+
+	                                          // allocate the memory needed 
 	    PID_t *buffer = (PID_t*)calloc( howmany_toread, sizeof(PID_t) );
 
+	                                          // protect the file access 
 	    omp_set_lock( &files[fn].lock );
-	
+
+	                                          // find the entry point of the ID block
 	    size_t  myret = seek_block(files[fn].ptr, "ID  ");
 	    if ( myret )
 	      {
@@ -847,19 +869,24 @@ int get_id_data(char *working_dir, char *name)
 	      }
 	    if ( myret )
 	      {
+		// move to the first position for this thread
 		myret = fseeko(files[fn].ptr, (off_t)(sizeof(PID_t)*file_start_offset), SEEK_CUR);
+		// load the data
 		fread(buffer, sizeof(PID_t), howmany_toread, files[fn].ptr);
 
+		// assign ids to our data structure
 		for ( num_t i = 0; i < howmany_toread; read++, i++ )
 		  {
-		    type += (file_start_offset+i >= npart_local_inc[type]);
+		    type += (file_start_offset+i >= npart_local_inc[type]);  // check whether the type has changed
 		    IDs[read].pid  = buffer[i];
 		    IDs[read].type = type;
 		    IDs[read].file = fn;
 		    IDs[read].pos  = file_start_offset + i;
 		  }
-		
+
+		// release the file access
 		omp_unset_lock( &files[fn].lock );
+		// release memory               
 		free(buffer);
 
 		fn += (read < myNID);
@@ -1804,13 +1831,16 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 
   num_t   progress[Nthreads];
   memset( progress, 0, sizeof(num_t)*Nthreads );
+
+
+  FILE *fff = fopen("verify.dat", "w");
   
   for ( int f = 0; f < nfiles; f++ )
     {
       FILE  *filein;      
       
       if ( nfiles > 1 )
-	sprintf( fname, "%s/%s.0", wdir, snapname );
+	sprintf( fname, "%s/%s.%d", wdir, snapname, f );
       else
 	sprintf( fname, "%s/%s", wdir, snapname );
       filein = fopen( fname, "r" );
@@ -1819,7 +1849,7 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	get_snap_detail( filein, EXP_FACTOR, &exp_factor);
       
       nparts_t nparts;
-      get_particles_num( filein, &nparts, 1 ); 
+      get_particles_num( filein, &nparts, FILE_PARTICLES ); 
 
       char *block = (char*)malloc(max_size_per_particle * nparts[ALL]);
 
@@ -1827,7 +1857,28 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
       get_block_from_file( "HEAD", filein, (void*)&snapheader );
 
       get_block_from_file( "POS ", filein, (void*)block );
-	  
+
+
+
+     #pragma omp parallel
+      {
+	num_t i = (f == 0 ? 0 : file_positions[me][f-1]);
+	
+	#pragma omp for ordered
+	for ( int th = 0; th < Nthreads; th++ )
+	  {
+	    for( ; (i < myNp) && (PPP[i].file == f) ; i++ )
+	      if( PPP[i].type==4 )
+		{
+		  float *pos = (float*)block + PPP[i].pos*3;
+		  for ( int j = 0; j < 3; j++ )
+		    if ( fabs(*(pos+j)) > snapheader.BoxSize )
+		      printf(".");
+		  fwrite(pos, sizeof(float), 3, fff);
+		}
+	  }
+      }
+      
      #pragma omp parallel
       {
 	if ( masked_in_file[me][f] > 0 )
@@ -1972,6 +2023,8 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 
     }
 
+  fclose(fff);
+
   for( int f = 0; f < nmasks; f++ )
     {
       int size;
@@ -2001,7 +2054,6 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
       {
 	num_t p = 0;
 	num_t w = 0;
-	num_t uw = 0;
 	for( num_t i = 0; i < myNp; i++ ) {
 	  int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);	  
 	  switch( is_masked ) {

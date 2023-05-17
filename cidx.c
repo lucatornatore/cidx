@@ -181,52 +181,13 @@ int main( int argc, char **argv)
      #pragma omp parallel
       get_howmany_in_subhaloes ( &diagnostic[0] );
 
-      //      printf("***** [D] %llu in shaloes, %llu in fof %d\n", diagnostic[0], diagnostic[1], FOFDBG );
+      DPRINT(0, 0, "***** [D] %llu in shaloes, %llu in fof %d\n", diagnostic[0], diagnostic[1], FOFDBG );
 
-
-      // ------------------------------------  
-      //  create a catalog table if required;
-      //  that is a table which summarize how
-      //  many particles of each type belong
-      //  to every fof and galaxy
-      //
-      
-      if( action & BUILD_FOF_TABLE )
-	{	    
-	  printf("building fof table..\n");
-	  fof_table = (fof_table_t*)calloc(HowMany[Fof] , sizeof(fof_table_t));
-
-	 #pragma omp parallel
-	  make_fof_table( fof_table, HowMany[Fof], 1 );	  	 
-
-	  FILE *file = fopen( catalog_table_name, "w" );
-	  
-	  for( num_t i = 0; i < HowMany[Fof]; i++ )
-	    {
-	      fprintf(file, "%10llu\t%lld\t%llu\t", i, (long long int)fof_table[i].nsubhaloes, fof_table[i].TotN );
-	      
-	      num_t subh_occupancy = 0;
-	      for( int s = 0; s < fof_table[i].nsubhaloes; s++ ) {
-		subh_occupancy += fof_table[i].subh_occupancy[s];
-		if (fof_table[i].subh_occupancy[s] == 0)
-		  printf(">>>> fof %llu has got sub-halo %u with 0 occupancy\n", i,s ); }
-	      free( fof_table[i].subh_occupancy );
-	      
-	      fprintf(file, "%llu\t*\t", subh_occupancy);
-	      
-	      for( int j = 0; j < NTYPES; j++ )
-		fprintf(file, "\t%10llu", fof_table[i].Nparts[j] );
-	      fprintf(file, "\n");
-	    }	    
-	  
-	  fclose(file);
-	  free( fof_table );
-	  
-	}
 
       
-      if ( !( (action & CREATE_CATALOGS ) ||
-	      ( action & WRITE_MASK_FILES ) ) )
+      if ( !( ( action & CREATE_CATALOGS ) ||
+	      ( action & WRITE_MASK_FILES ) ||
+	      ( action & BUILD_FOF_TABLE) ) )
 	return 0;
 
       
@@ -384,6 +345,49 @@ int main( int argc, char **argv)
 	}
 
       }
+
+      
+      // ------------------------------------  
+      //  create a catalog table if required;
+      //  that is a table which summarize how
+      //  many particles of each type belong
+      //  to every fof and galaxy
+      //
+      
+      if( action & BUILD_FOF_TABLE )
+	{	    
+	  printf("building fof table..\n");
+	  fof_table = (fof_table_t*)calloc(HowMany[Fof] , sizeof(fof_table_t));
+
+	 #pragma omp parallel
+	  make_fof_table( fof_table, HowMany[Fof], 1 );	  	 
+
+	  FILE *file = fopen( catalog_table_name, "w" );
+	  
+	  for( num_t i = 0; i < HowMany[Fof]; i++ )
+	    {
+	      fprintf(file, "%10llu\t%lld\t%llu\t", i, (long long int)fof_table[i].nsubhaloes, fof_table[i].TotN );
+	      
+	      num_t subh_occupancy = 0;
+	      for( int s = 0; s < fof_table[i].nsubhaloes; s++ ) {
+		subh_occupancy += fof_table[i].subh_occupancy[s];
+		if (fof_table[i].subh_occupancy[s] == 0)
+		  printf(">>>> fof %llu has got sub-halo %u with 0 occupancy\n", i,s ); }
+	      free( fof_table[i].subh_occupancy );
+	      
+	      fprintf(file, "%llu\t*\t", subh_occupancy);
+	      
+	      for( int j = 0; j < NTYPES; j++ )
+		fprintf(file, "\t%10llu", fof_table[i].Nparts[j] );
+	      fprintf(file, "\n");
+	    }	    
+	  
+	  fclose(file);
+	  free( fof_table );
+	  
+	}
+
+      
        
       // ------------------------------------  
       //  write files for masked particles
