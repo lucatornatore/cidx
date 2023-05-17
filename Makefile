@@ -18,7 +18,7 @@ EXEC_NAME  =cidx
 LONG_IDS   =off
 PRODUCTION =on
 
-DEBUG_INFO =on
+DEBUG_INFO =off
 SANITIZE   =off
 PAPI       =off
 
@@ -65,7 +65,7 @@ endif
 
 ifeq ($(PRODUCTION),on)
 $(info compiling for production)
-	ifeq (($CC),gcc)
+	ifeq ($(CC),gcc)
 	OPTIMIZE_FLAGS = -O4 -march=native -faggressive-loop-optimizations
 	else ifeq ($(CC),xlc)
 	OPTIMIZE_FLAGS = -O5 -qnostrict -qarch=auto -qtune=auto -qhot
