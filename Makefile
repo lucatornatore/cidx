@@ -8,6 +8,7 @@ ifeq ($(arch),ppc64le)
 else 
 	myCC=gcc
 endif
+
 CC=$(myCC)
 $(info using $(CC) c compiler)
 FPIC       = "-fPIC"
@@ -16,9 +17,8 @@ EXEC_NAME  =cidx
 
 LONG_IDS   =off
 PRODUCTION =on
-DEBUG      =off
 
-DEBUG_INFO =off
+DEBUG_INFO =on
 SANITIZE   =off
 PAPI       =off
 
@@ -40,9 +40,8 @@ ifeq ($(PAPI),on)
 $(info using PAPI)
 OPT += -DPAPI_MEASURE         # to obtain some metrics
 endif
-ifeq ($(DEBUG),on)
-$(info internal debugging checks on)
-OPT += -DDEBUG
+ifeq ($(PRODUCTION),off)
+DEBUG=on
 endif
 
 
@@ -67,16 +66,18 @@ endif
 ifeq ($(PRODUCTION),on)
 $(info compiling for production)
 	ifeq (($CC),gcc)
-	OPTIMIZE_FLAGS = -O3 -march=native -faggressive-loop-optimizations
+	OPTIMIZE_FLAGS = -O4 -march=native -faggressive-loop-optimizations
 	else ifeq ($(CC),xlc)
 	OPTIMIZE_FLAGS = -O5 -qnostrict -qarch=auto -qtune=auto -qhot
 	endif
 	CFLAGS = $(DBG_INFO) $(OPTIMIZE_FLAGS) -fno-stack-protector $(COMMON_CFLAGS) $(SANITIZE_FLAGS)
 	CIDX = $(EXEC_NAME)
 else
+$(info internal debugging checks on)
+	OPT += -DDEBUG
 $(info compiling with debugging symbols)
 	CIDX = $(EXEC_NAME)_g
-	CFLAGS = -ggdb3 $(SANITIZE_FLAGS) $(COMMON_CFLAGS)
+	CFLAGS = -O2 -ggdb3 $(SANITIZE_FLAGS) $(COMMON_CFLAGS)
 endif
 
 # ------------------------------------ define dependence files for each target
