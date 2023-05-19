@@ -1110,7 +1110,10 @@ int assign_type_to_subfind_particles( num_t *o_of_r, num_t *range_failures, num_
 	    pidtype_t *stop = all_IDs[target_thread];
 	    while( (res>stop) && (res-1)-> pid == pid ) --res;
 	    stop += all_NID[target_thread];
-	    while( res < stop && (res+1)-> pid == pid && res-> gen != gen ) ++res;
+	    while( (res < stop-1) &&
+		   ((res+1)-> pid == pid) &&
+		   (res->gen != gen) )
+	      ++res;
 	    if( res->gen != gen )
 	      gen_fails++;
 	    else { PPP[j].type = res->type; PPP[j].file = res->file; PPP[j].pos = res->pos; }}
