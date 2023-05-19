@@ -1854,8 +1854,7 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
       snapheader_t snapheader;
       get_block_from_file( "HEAD", filein, (void*)&snapheader );
 
-      get_block_from_file( "POS ", filein, (void*)block );
-
+      get_block_from_file( "POS ", filein, (void*)block );      
       
      #pragma omp parallel
       {
@@ -2001,7 +2000,6 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 
     }
 
-
   for( int f = 0; f < nmasks; f++ )
     {
       int size;
@@ -2029,22 +2027,25 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
    #pragma omp for ordered
     for( int t = 0; t < Nthreads; t++ )
       {
-	num_t p = 0;
-	num_t w = 0;
-	for( num_t i = 0; i < myNp; i++ ) {
-	  int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);	  
-	  switch( is_masked ) {
-	  case 1: {
-	    for( int m = 0; m < nmasks; m++ )
-	      {
-		int s = ( (PPP[i].fofid == masks[m].fof_num) &&
-			  ((PPP[i].gid == masks[m].ngal) ||
-			   (masks[m].ngal == -1)) );
+       #pragma omp ordered
+	{
+	  num_t p = 0;
+	  num_t w = 0;
+	  for( num_t i = 0; i < myNp; i++ ) {
+	    int is_masked = ((_pmasked_[p_idx(i)] & (p_bytemask(i,1))) != 0);	  
+	    switch( is_masked ) {
+	    case 1: {
+	      for( int m = 0; m < nmasks; m++ )
+		{
+		  int s = ( (PPP[i].fofid == masks[m].fof_num) &&
+			    ((PPP[i].gid == masks[m].ngal) ||
+			     (masks[m].ngal == -1)) );
 		switch( s != 0 ) {
 		case 1: {fwrite( &outsnap_data[p], sizeof(outsnap_t), 1, FofGalFiles[m] ); w++;} break; }
-	      } p++; } break; }
+		} p++; } break; }
+	  }	
+	  dprint(2,-1, "\t\t thread %d has found %llu masked particles and written %llu\n", me, p, w );
 	}
-	dprint(2,-1, "\t\t thread %d has found %llu masked particles and written %llu\n", me, p, w );
       }
     
     free( p_is_masked[me] );
