@@ -1795,7 +1795,7 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	     me, p, _masked_parts_[ALL], __LINE__, __FILE__ );
    #endif
       
-    dprint(0, -1, "\t[thread %d] %llu particles masked\n", me, (unsigned long long)p);  // just for debug
+    dprint(1, -1, "\t[thread %d] %llu particles masked\n", me, (unsigned long long)p);  // just for debug
 
     
     }
