@@ -1833,8 +1833,6 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
   memset( progress, 0, sizeof(num_t)*Nthreads );
 
 
-  FILE *fff = fopen("verify.dat", "w");
-  
   for ( int f = 0; f < nfiles; f++ )
     {
       FILE  *filein;      
@@ -1858,26 +1856,6 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 
       get_block_from_file( "POS ", filein, (void*)block );
 
-
-
-     #pragma omp parallel
-      {
-	num_t i = (f == 0 ? 0 : file_positions[me][f-1]);
-	
-	#pragma omp for ordered
-	for ( int th = 0; th < Nthreads; th++ )
-	  {
-	    for( ; (i < myNp) && (PPP[i].file == f) ; i++ )
-	      if( PPP[i].type==4 )
-		{
-		  float *pos = (float*)block + PPP[i].pos*3;
-		  for ( int j = 0; j < 3; j++ )
-		    if ( fabs(*(pos+j)) > snapheader.BoxSize )
-		      printf(".");
-		  fwrite(pos, sizeof(float), 3, fff);
-		}
-	  }
-      }
       
      #pragma omp parallel
       {
@@ -2023,7 +2001,6 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 
     }
 
-  fclose(fff);
 
   for( int f = 0; f < nmasks; f++ )
     {
