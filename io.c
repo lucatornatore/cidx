@@ -1785,7 +1785,7 @@ int write_fofgal_snapshots( char *wdir, char *snapname,
 	  outsnap_data[p].type      = PPP[i].type; p++; } break; }
       }
 
-    for ( int i = 0; i <= nfiles; i++ )
+    for ( int i = 0; i < nfiles; i++ )
       masked_in_file[me][i] = _masked_in_file_[i];
 
    #if defined(DEBUG)
