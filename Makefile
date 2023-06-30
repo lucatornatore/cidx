@@ -1,19 +1,24 @@
-#myCC=gcc
-#myCC=clx
+# -------------------------------
+#
+# SET THE COMPILER
+# DEFAULT is gcc
+#
 
 arch := $(shell uname -p)
 $(info ${arch} architecture found)
 ifeq ($(arch),ppc64le)
 	myCC=xlc
 else 
+	myCC=gcc
 	#myCC=gcc-12
 	#myCC=clang-16
-	myCC=icx
+	#myCC=icx
 endif
 
 CC=$(myCC)
 $(info using $(CC) c compiler)
 FPIC       = "-fPIC"
+# -------------------------------
 
 EXEC_NAME  =cidx
 
